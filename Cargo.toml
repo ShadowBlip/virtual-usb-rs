@@ -1,0 +1,14 @@
+[package]
+name = "virtual-usb"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+libudev = "0.3.0"
+log = "0.4.20"
+packed_struct = "0.10.1"
+simple_logger = "4.3.3"
+socketpair = "0.19.4"
+#packed_struct = { path = "../packed_struct.rs/packed_struct" }
