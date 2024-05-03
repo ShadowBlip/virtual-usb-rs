@@ -1,5 +1,78 @@
+//! Reference:
+//! https://github.com/toasterllc/Toastbox/blob/d3b1770c6816eb648ee2e0a754c2dd9c3bd5342f/USB.h
+
 #![allow(warnings)]
 use packed_struct::prelude::*;
+
+/// Request type (bRequest)
+#[derive(PrimitiveEnum_u8, Debug, Copy, Clone, PartialEq)]
+pub enum Request {
+    GetStatus = 0,
+    ClearFeature = 1,
+    _Reserved0 = 2,
+    SetFeature = 3,
+    _Reserved1 = 4,
+    SetAddress = 5,
+    GetDescriptor = 6,
+    SetDescriptor = 7,
+    GetConfiguration = 8,
+    SetConfiguration = 9,
+    GetInterface = 10,
+    SetInterface = 11,
+    SynchFrame = 12,
+}
+
+/// Request type (bmRequestType)
+pub enum RequestType {
+    Direction(Direction),
+    Type(Type),
+    Recipient(Recipient),
+}
+
+pub const DirectionMask: u8 = 0x80;
+pub enum Direction {
+    Out = 0x00,
+    In = 0x80,
+}
+
+pub const TypeMask: u8 = 0x60;
+pub enum Type {
+    Standard = 0x00,
+    Class = 0x20,
+    Vendor = 0x40,
+    Reserved = 0x60,
+}
+
+pub const RecipientMask: u8 = 0x1F;
+#[derive(Copy, Clone)]
+pub enum Recipient {
+    Device = 0x00,
+    Interface = 0x01,
+    Endpoint = 0x02,
+    Other = 0x03,
+}
+
+impl Recipient {
+    pub fn as_u8(&self) -> u8 {
+        *self as u8
+    }
+}
+
+/// Setup Request
+#[derive(PackedStruct, Debug, Copy, Clone, PartialEq)]
+#[packed_struct(bit_numbering = "msb0", size_bytes = "8")]
+pub struct SetupRequest {
+    #[packed_field(bytes = "0")]
+    pub bm_request_type: u8,
+    #[packed_field(bytes = "1", ty = "enum")]
+    pub b_request: Request,
+    #[packed_field(bytes = "2..=3", endian = "msb")]
+    pub w_value: Integer<u16, packed_bits::Bits<16>>,
+    #[packed_field(bytes = "4..=5", endian = "msb")]
+    pub w_index: Integer<u16, packed_bits::Bits<16>>,
+    #[packed_field(bytes = "6..=7", endian = "msb")]
+    pub w_length: Integer<u16, packed_bits::Bits<16>>,
+}
 
 /// Descriptor type (bDescriptorType, wValue [high bytes])
 #[derive(PrimitiveEnum, Debug, Copy, Clone, PartialEq)]

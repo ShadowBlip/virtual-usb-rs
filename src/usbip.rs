@@ -7,11 +7,20 @@ use std::{
 use libudev::{Context, Device};
 use packed_struct::prelude::*;
 
-const SYSFS_PATH_MAX: usize = 256;
-const SYSFS_BUS_ID_SIZE: usize = 32;
-const MAX_STATUS_NAME: usize = 18;
-const USBIP_VHCI_BUS_TYPE: &str = "platform";
-const USBIP_VHCI_DEVICE_NAME: &str = "vhci_hcd.0";
+use crate::usb::SetupRequest;
+
+pub const SYSFS_PATH_MAX: usize = 256;
+pub const SYSFS_BUS_ID_SIZE: usize = 32;
+pub const MAX_STATUS_NAME: usize = 18;
+pub const USBIP_CMD_SIZE: usize = 48;
+pub const USBIP_CMD_SUBMIT: u32 = 1;
+pub const USBIP_CMD_UNLINK: u32 = 2;
+pub const USBIP_RET_SUBMIT: u32 = 3;
+pub const USBIP_RET_UNLINK: u32 = 4;
+pub const USBIP_DIR_OUT: u32 = 0;
+pub const USBIP_DIR_IN: u32 = 1;
+pub const USBIP_VHCI_BUS_TYPE: &str = "platform";
+pub const USBIP_VHCI_DEVICE_NAME: &str = "vhci_hcd.0";
 
 /// Available USB Hub speeds
 pub enum HubSpeed {
@@ -28,6 +37,64 @@ pub enum USBDeviceSpeed {
     USBSpeedWireless = 4,  /* wireless (usb 2.5) */
     USBSpeedSuper = 5,     /* usb 3.0 */
     USBSpeedSuperPlus = 6, /* usb 3.1 */
+}
+
+/// Possible USBIP headers
+#[derive(Debug)]
+pub enum USBIPHeader {
+    CmdSubmit(USBIPHeaderCmdSubmit),
+    CmdUnlink(USBIPHeaderCmdUnlink),
+}
+
+#[derive(PackedStruct, Debug, Copy, Clone, PartialEq)]
+#[packed_struct(bit_numbering = "msb0", size_bytes = "48")]
+pub struct USBIPHeaderInit {
+    #[packed_field(bytes = "0..=19")]
+    pub base: USBIPHeaderBasic,
+}
+
+#[derive(PackedStruct, Debug, Copy, Clone, PartialEq)]
+#[packed_struct(bit_numbering = "msb0", size_bytes = "48")]
+pub struct USBIPHeaderCmdSubmit {
+    #[packed_field(bytes = "0..=19")]
+    pub base: USBIPHeaderBasic,
+    #[packed_field(bytes = "20..=23", endian = "msb")]
+    pub transfer_flags: Integer<u32, packed_bits::Bits<32>>,
+    #[packed_field(bytes = "24..=27", endian = "msb")]
+    pub transfer_buffer_length: Integer<i32, packed_bits::Bits<32>>,
+    #[packed_field(bytes = "28..=31", endian = "msb")]
+    pub start_frame: Integer<i32, packed_bits::Bits<32>>,
+    #[packed_field(bytes = "32..=35", endian = "msb")]
+    pub number_of_packets: Integer<i32, packed_bits::Bits<32>>,
+    #[packed_field(bytes = "36..=39", endian = "msb")]
+    pub interval: Integer<i32, packed_bits::Bits<32>>,
+    #[packed_field(bytes = "40..=47", endian = "msb")]
+    pub setup: SetupRequest,
+}
+
+#[derive(PackedStruct, Debug, Copy, Clone, PartialEq)]
+#[packed_struct(bit_numbering = "msb0", size_bytes = "48")]
+pub struct USBIPHeaderCmdUnlink {
+    #[packed_field(bytes = "0..=19")]
+    pub base: USBIPHeaderBasic,
+    #[packed_field(bytes = "20..=23", endian = "msb")]
+    pub seqnum: Integer<u32, packed_bits::Bits<32>>,
+}
+
+/// USBIP Header Basic
+#[derive(PackedStruct, Debug, Copy, Clone, PartialEq)]
+#[packed_struct(bit_numbering = "msb0", size_bytes = "20")]
+pub struct USBIPHeaderBasic {
+    #[packed_field(bytes = "0..=3", endian = "msb")]
+    pub command: Integer<u32, packed_bits::Bits<32>>,
+    #[packed_field(bytes = "4..=7", endian = "msb")]
+    pub seqnum: Integer<u32, packed_bits::Bits<32>>,
+    #[packed_field(bytes = "8..=11", endian = "msb")]
+    pub devid: Integer<u32, packed_bits::Bits<32>>,
+    #[packed_field(bytes = "12..=15", endian = "msb")]
+    pub direction: Integer<u32, packed_bits::Bits<32>>,
+    #[packed_field(bytes = "16..=19", endian = "msb")]
+    pub ep: Integer<u32, packed_bits::Bits<32>>,
 }
 
 #[derive(PackedStruct, Debug, Copy, Clone, PartialEq)]
@@ -124,22 +191,14 @@ impl Driver {
         let Some(device) = self.hc_device.as_mut() else {
             return Err("Device driver has not been opened".into());
         };
-        let Some(path) = device.syspath() else {
-            return Err("Failed to get device path".into());
-        };
         let fd = sockfd.as_raw_fd();
 
         // Create the content to send
-        let data = format!("{port} {fd} {devid}, {speed}");
+        let data = format!("{port} {fd} {devid} {speed}");
         log::debug!("attach data: {data}");
 
-        // Construct the path to the sysfs attach attribute
-        let path = path.to_string_lossy().to_string();
-        let attach_attr_path = format!("{path}/attach");
-        log::debug!("attach attribute path: {attach_attr_path}");
-
         // Attach the device
-        device.set_attribute_value(attach_attr_path, data)?;
+        device.set_attribute_value("attach", data)?;
         log::debug!("attached port: {port}");
 
         Ok(())
