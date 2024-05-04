@@ -40,10 +40,17 @@ pub enum USBDeviceSpeed {
 }
 
 /// Possible USBIP headers
-#[derive(Debug)]
-pub enum USBIPHeader {
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum USBIPCommandHeader {
     CmdSubmit(USBIPHeaderCmdSubmit),
     CmdUnlink(USBIPHeaderCmdUnlink),
+}
+
+/// Possible USBIP reply headers
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum USBIPReplyHeader {
+    RetSubmit(USBIPHeaderRetSubmit),
+    RetUnlink(USBIPHeaderRetUnlink),
 }
 
 #[derive(PackedStruct, Debug, Copy, Clone, PartialEq)]
@@ -74,11 +81,37 @@ pub struct USBIPHeaderCmdSubmit {
 
 #[derive(PackedStruct, Debug, Copy, Clone, PartialEq)]
 #[packed_struct(bit_numbering = "msb0", size_bytes = "48")]
+pub struct USBIPHeaderRetSubmit {
+    #[packed_field(bytes = "0..=19")]
+    pub base: USBIPHeaderBasic,
+    #[packed_field(bytes = "20..=23", endian = "msb")]
+    pub status: Integer<i32, packed_bits::Bits<32>>,
+    #[packed_field(bytes = "24..=27", endian = "msb")]
+    pub actual_length: Integer<i32, packed_bits::Bits<32>>,
+    #[packed_field(bytes = "28..=31", endian = "msb")]
+    pub start_frame: Integer<i32, packed_bits::Bits<32>>,
+    #[packed_field(bytes = "32..=35", endian = "msb")]
+    pub number_of_packets: Integer<i32, packed_bits::Bits<32>>,
+    #[packed_field(bytes = "36..=39", endian = "msb")]
+    pub error_count: Integer<i32, packed_bits::Bits<32>>,
+}
+
+#[derive(PackedStruct, Debug, Copy, Clone, PartialEq)]
+#[packed_struct(bit_numbering = "msb0", size_bytes = "48")]
 pub struct USBIPHeaderCmdUnlink {
     #[packed_field(bytes = "0..=19")]
     pub base: USBIPHeaderBasic,
     #[packed_field(bytes = "20..=23", endian = "msb")]
     pub seqnum: Integer<u32, packed_bits::Bits<32>>,
+}
+
+#[derive(PackedStruct, Debug, Copy, Clone, PartialEq)]
+#[packed_struct(bit_numbering = "msb0", size_bytes = "48")]
+pub struct USBIPHeaderRetUnlink {
+    #[packed_field(bytes = "0..=19")]
+    pub base: USBIPHeaderBasic,
+    #[packed_field(bytes = "20..=23", endian = "msb")]
+    pub status: Integer<i32, packed_bits::Bits<32>>,
 }
 
 /// USBIP Header Basic

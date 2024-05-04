@@ -2,7 +2,17 @@
 //! https://github.com/toasterllc/Toastbox/blob/d3b1770c6816eb648ee2e0a754c2dd9c3bd5342f/USB.h
 
 #![allow(warnings)]
+pub mod cdc;
+pub mod hid;
+
+use std::{error::Error, fmt::Display};
+
 use packed_struct::prelude::*;
+
+use self::cdc::{
+    AbstractControlManagementFunctionalDescriptor, CallManagementFunctionalDescriptor,
+    HeaderFunctionalDescriptor, UnionFunctionalDescriptor,
+};
 
 /// Request type (bRequest)
 #[derive(PrimitiveEnum_u8, Debug, Copy, Clone, PartialEq)]
@@ -58,6 +68,10 @@ impl Recipient {
     }
 }
 
+// Configuration Characteristics
+pub const RemoteWakeup: u8 = 1 << 5;
+pub const SelfPowered: u8 = 1 << 6;
+
 /// Setup Request
 #[derive(PackedStruct, Debug, Copy, Clone, PartialEq)]
 #[packed_struct(bit_numbering = "msb0", size_bytes = "8")]
@@ -66,16 +80,16 @@ pub struct SetupRequest {
     pub bm_request_type: u8,
     #[packed_field(bytes = "1", ty = "enum")]
     pub b_request: Request,
-    #[packed_field(bytes = "2..=3", endian = "msb")]
+    #[packed_field(bytes = "2..=3", endian = "lsb")]
     pub w_value: Integer<u16, packed_bits::Bits<16>>,
-    #[packed_field(bytes = "4..=5", endian = "msb")]
+    #[packed_field(bytes = "4..=5", endian = "lsb")]
     pub w_index: Integer<u16, packed_bits::Bits<16>>,
-    #[packed_field(bytes = "6..=7", endian = "msb")]
+    #[packed_field(bytes = "6..=7", endian = "lsb")]
     pub w_length: Integer<u16, packed_bits::Bits<16>>,
 }
 
 /// Descriptor type (bDescriptorType, wValue [high bytes])
-#[derive(PrimitiveEnum, Debug, Copy, Clone, PartialEq)]
+#[derive(PrimitiveEnum_u8, Debug, Copy, Clone, PartialEq)]
 pub enum DescriptorType {
     Device = 1,
     Configuration = 2,
@@ -158,8 +172,8 @@ impl DeviceDescriptor {
             id_vendor: Integer::from_primitive(vendor_id),
             id_product: Integer::from_primitive(product_id),
             bcd_device: Integer::from_primitive(0x0100),
-            i_manufacturer: 0x00, // String 1
-            i_product: 0x00,      // String 2
+            i_manufacturer: 0x01, // String 1
+            i_product: 0x02,      // String 2
             i_serial_number: 0x00,
             b_num_configurations: 0x01,
         }
@@ -229,6 +243,94 @@ impl DeviceQualifierDescriptor {
     }
 }
 
+/// Configuration is a higher-level structure for building a USB payload from
+/// [ConfigurationDescriptor] and one or more [InterfaceDescriptor].
+#[derive(Debug, Clone, PartialEq)]
+pub struct Configuration {
+    pub conf_desc: ConfigurationDescriptor,
+    pub interfaces: Vec<Interface>,
+}
+
+impl Configuration {
+    pub fn new(conf_desc: ConfigurationDescriptor, interfaces: Vec<Interface>) -> Self {
+        Self {
+            conf_desc,
+            interfaces,
+        }
+    }
+
+    pub fn pack_to_vec(&self) -> Result<Vec<u8>, PackingError> {
+        // Calculate the total size of the configuration
+        let mut config = self.conf_desc.clone();
+
+        // TODO: Get the size of the total configuration to allocate the
+        // byte array to the correct size.
+        let size = 9 + (9 * self.interfaces.len());
+
+        let mut result: Vec<u8> = Vec::with_capacity(size);
+        let mut bytes = self.conf_desc.pack_to_vec()?;
+        result.append(&mut bytes);
+
+        for iface in self.interfaces.iter() {
+            result.append(&mut iface.pack_to_vec()?);
+        }
+
+        Ok(result)
+    }
+}
+
+impl Display for Configuration {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.conf_desc)
+    }
+}
+
+/// [Configuration] builder for generating a new USB configuration
+pub struct ConfigurationBuilder {
+    config: Configuration,
+}
+
+impl ConfigurationBuilder {
+    /// Create a new configuration builder for building a USB config
+    pub fn new() -> Self {
+        Self {
+            config: Configuration {
+                conf_desc: ConfigurationDescriptor::new(),
+                interfaces: vec![],
+            },
+        }
+    }
+
+    /// Construct the new USB configuration
+    pub fn build(&self) -> Configuration {
+        self.config.clone()
+    }
+
+    /// Set the maximum power for this device.
+    /// Maximum power consumption of the USB device from the bus in this specific
+    /// configuration when the device is fully operational. Expressed in 2mA
+    /// units (i.e., 50 = 100mA).
+    pub fn max_power(&mut self, max_power_mA: u16) -> &mut Self {
+        self.config.conf_desc.b_max_power = (max_power_mA / 2) as u8;
+        self
+    }
+
+    /// Set the interface for this configuration
+    pub fn interface(&mut self, interface: Interface) -> &mut Self {
+        self.config.interfaces.push(interface);
+        self.config.conf_desc.b_num_interfaces = self.config.interfaces.len() as u8;
+
+        // Update the total size
+        let mut size = 9; // Start with the size of the config desc header
+        for iface in self.config.interfaces.iter() {
+            size += iface.get_size();
+        }
+        self.config.conf_desc.w_total_length = Integer::from_primitive(size as u16);
+
+        self
+    }
+}
+
 /// The Configuration Descriptor contains information about the device power
 /// requirements and the number of interfaces it can support. A device can have
 /// multiple configurations. The host can select the configuration that best
@@ -275,13 +377,83 @@ impl ConfigurationDescriptor {
         Self {
             b_length: 9,
             b_descriptor_type: DescriptorType::Configuration as u8,
-            w_total_length: todo!(),
-            b_num_interfaces: todo!(),
-            b_configuration_value: todo!(),
-            i_configuration: todo!(),
-            bm_attributes: todo!(),
-            b_max_power: todo!(),
+            w_total_length: Integer::from_primitive(0),
+            b_num_interfaces: 0,
+            b_configuration_value: 0,
+            i_configuration: 0,
+            bm_attributes: 0,
+            b_max_power: 0,
         }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Interface {
+    iface_desc: InterfaceDescriptor,
+    header_func_descs: Vec<HeaderFunctionalDescriptor>,
+    call_management_func_descs: Vec<CallManagementFunctionalDescriptor>,
+    acm_func_descs: Vec<AbstractControlManagementFunctionalDescriptor>,
+    union_func_descs: Vec<UnionFunctionalDescriptor>,
+    endpoint_descs: Vec<EndpointDescriptor>,
+}
+
+impl Interface {
+    /// Create a new interface descriptor
+    pub fn new() -> Self {
+        Self::new()
+    }
+
+    /// Serialize the interface into bytes
+    pub fn pack_to_vec(&self) -> Result<Vec<u8>, PackingError> {
+        // TODO: Get the size of the total configuration to allocate the
+        // byte array to the correct size.
+        let size = 9;
+
+        let mut result: Vec<u8> = Vec::with_capacity(size);
+        let mut bytes = self.iface_desc.pack_to_vec()?;
+        result.append(&mut bytes);
+
+        //for iface in self.interfaces {
+        //    result.append(iface.pack_to_vec()?);
+        //}
+
+        return Ok(result);
+    }
+
+    /// Returns the byte serialized size of the interface
+    pub fn get_size(&self) -> usize {
+        return 0;
+    }
+}
+
+#[derive(PrimitiveEnum_u8, Debug, Copy, Clone, PartialEq)]
+pub enum InterfaceClass {
+    Hid = 0x03,
+}
+
+/// [Interface] builder for constructing an HID (Human Interface Device)
+/// interface descriptor.
+pub struct HidInterfaceBuilder {
+    iface: Interface,
+}
+
+impl HidInterfaceBuilder {
+    pub fn new() -> Self {
+        let mut iface = Interface::new();
+        iface.iface_desc.b_interface_class = InterfaceClass::Hid as u8;
+
+        Self { iface }
+    }
+
+    /// Construct the new Interface configuration
+    pub fn build(&self) -> Interface {
+        self.iface.clone()
+    }
+
+    /// Set the interface subclass
+    pub fn subclass(&mut self, subclass: u8) -> &mut Self {
+        self.iface.iface_desc.b_interface_subclass = subclass;
+        self
     }
 }
 
@@ -384,9 +556,6 @@ pub struct EndpointDescriptor {
     pub b_interval: u8,
 }
 
-// TODO: PackedStruct does not support generics to support aribitarily sized
-// arrays.
-//
 /// String descriptors are optional and add human readable information to the
 /// other descriptors. If a device does not support string descriptors, all
 /// references to string descriptors within device, configuration, and interface
@@ -394,17 +563,215 @@ pub struct EndpointDescriptor {
 ///
 /// Max character count is 126 (2 string descriptor header bytes + 126 UTF-16
 /// characters).
-#[derive(PackedStruct, Debug, Copy, Clone, PartialEq)]
-#[packed_struct(bit_numbering = "msb0")]
-pub struct StringDescriptorExample {
-    #[packed_field(bytes = "0")]
-    pub b_length: u8,
-    #[packed_field(bytes = "1")]
-    pub b_descriptor_type: u8,
-    #[packed_field(element_size_bits = "16", endian = "lsb")]
-    pub str: [u16; 126],
+#[derive(Debug, Clone)]
+pub struct StringDescriptor {
+    data: Vec<u8>,
+    str: Option<String>,
 }
 
-pub struct StringDescriptor {
-    str: String,
+impl StringDescriptor {
+    pub fn pack_to_vec(&self) -> Result<Vec<u8>, PackingError> {
+        let b_length = self.data.len() as u8 + 2;
+        let b_descriptor_type = DescriptorType::String as u8;
+        let mut str_bytes = self.data.clone();
+        if self.data.len() > 126 {
+            return Err(PackingError::InvalidValue);
+        }
+
+        let mut desc = Vec::with_capacity(b_length as usize);
+        desc.push(b_length);
+        desc.push(b_descriptor_type);
+        desc.append(&mut str_bytes);
+
+        Ok(desc)
+    }
+
+    pub fn to_string(&self) -> String {
+        self.str.clone().unwrap_or_default()
+    }
+}
+
+impl From<String> for StringDescriptor {
+    fn from(value: String) -> Self {
+        Self {
+            data: value.as_bytes().to_vec(),
+            str: Some(value),
+        }
+    }
+}
+
+impl From<&str> for StringDescriptor {
+    fn from(value: &str) -> Self {
+        Self {
+            data: value.as_bytes().to_vec(),
+            str: Some(value.to_string()),
+        }
+    }
+}
+
+impl From<Vec<LangId>> for StringDescriptor {
+    fn from(value: Vec<LangId>) -> Self {
+        let mut bytes: Vec<u8> = Vec::with_capacity(value.len() * 2);
+        for lang in value {
+            let lang_id = lang as u16;
+            let mut lang_bytes = lang_id.to_lsb_bytes().to_vec();
+            bytes.append(&mut lang_bytes);
+        }
+        Self {
+            data: bytes,
+            str: None,
+        }
+    }
+}
+
+/// 16-bit language ID (LANGID) defined by the USB-IF
+pub enum LangId {
+    Afrikaans = 0x0436,
+    Albanian = 0x041c,
+    ArabicSaudiArabia = 0x0401,
+    ArabicIraq = 0x0801,
+    ArabicEgypt = 0x0c01,
+    ArabicLibya = 0x1001,
+    ArabicAlgeria = 0x1401,
+    ArabicMorocco = 0x1801,
+    ArabicTunisia = 0x1c01,
+    ArabicOman = 0x2001,
+    ArabicYemen = 0x2401,
+    ArabicSyria = 0x2801,
+    ArabicJordan = 0x2c01,
+    ArabicLebanon = 0x3001,
+    ArabicKuwait = 0x3401,
+    ArabicUAE = 0x3801,
+    ArabicBahrain = 0x3c01,
+    ArabicQatar = 0x4001,
+    Armenian = 0x042b,
+    Assamese = 0x044d,
+    AzeriLatin = 0x042c,
+    AzeriCyrillic = 0x082c,
+    Basque = 0x042d,
+    Belarussian = 0x0423,
+    Bengali = 0x0445,
+    Bulgarian = 0x0402,
+    Burmese = 0x0455,
+    Catalan = 0x0403,
+    ChineseTaiwan = 0x0404,
+    ChinesePRC = 0x0804,
+    ChineseHongKongSARPRC = 0x0c04,
+    ChineseSingapore = 0x1004,
+    ChineseMacauSAR = 0x1404,
+    Croatian = 0x041a,
+    Czech = 0x0405,
+    Danish = 0x0406,
+    DutchNetherlands = 0x0413,
+    DutchBelgium = 0x0813,
+    EnglishUnitedStates = 0x0409,
+    EnglishUnitedKingdom = 0x0809,
+    EnglishAustralian = 0x0c09,
+    EnglishCanadian = 0x1009,
+    EnglishNewZealand = 0x1409,
+    EnglishIreland = 0x1809,
+    EnglishSouthAfrica = 0x1c09,
+    EnglishJamaica = 0x2009,
+    EnglishCaribbean = 0x2409,
+    EnglishBelize = 0x2809,
+    EnglishTrinidad = 0x2c09,
+    EnglishZimbabwe = 0x3009,
+    EnglishPhilippines = 0x3409,
+    Estonian = 0x0425,
+    Faeroese = 0x0438,
+    Farsi = 0x0429,
+    Finnish = 0x040b,
+    FrenchStandard = 0x040c,
+    FrenchBelgian = 0x080c,
+    FrenchCanadian = 0x0c0c,
+    FrenchSwitzerland = 0x100c,
+    FrenchLuxembourg = 0x140c,
+    FrenchMonaco = 0x180c,
+    Georgian = 0x0437,
+    GermanStandard = 0x0407,
+    GermanSwitzerland = 0x0807,
+    GermanAustria = 0x0c07,
+    GermanLuxembourg = 0x1007,
+    GermanLiechtenstein = 0x1407,
+    Greek = 0x0408,
+    Gujarati = 0x0447,
+    Hebrew = 0x040d,
+    Hindi = 0x0439,
+    Hungarian = 0x040e,
+    Icelandic = 0x040f,
+    Indonesian = 0x0421,
+    ItalianStandard = 0x0410,
+    ItalianSwitzerland = 0x0810,
+    Japanese = 0x0411,
+    Kannada = 0x044b,
+    KashmiriIndia = 0x0860,
+    Kazakh = 0x043f,
+    Konkani = 0x0457,
+    Korean = 0x0412,
+    KoreanJohab = 0x0812,
+    Latvian = 0x0426,
+    Lithuanian = 0x0427,
+    LithuanianClassic = 0x0827,
+    Macedonian = 0x042f,
+    MalayMalaysian = 0x043e,
+    MalayBruneiDarussalam = 0x083e,
+    Malayalam = 0x044c,
+    Manipuri = 0x0458,
+    Marathi = 0x044e,
+    NepaliIndia = 0x0861,
+    NorwegianBokmal = 0x0414,
+    NorwegianNynorsk = 0x0814,
+    Oriya = 0x0448,
+    Polish = 0x0415,
+    PortugueseBrazil = 0x0416,
+    PortugueseStandard = 0x0816,
+    Punjabi = 0x0446,
+    Romanian = 0x0418,
+    Russian = 0x0419,
+    Sanskrit = 0x044f,
+    SerbianCyrillic = 0x0c1a,
+    SerbianLatin = 0x081a,
+    Sindhi = 0x0459,
+    Slovak = 0x041b,
+    Slovenian = 0x0424,
+    SpanishTraditionalSort = 0x040a,
+    SpanishMexican = 0x080a,
+    SpanishModernSort = 0x0c0a,
+    SpanishGuatemala = 0x100a,
+    SpanishCostaRica = 0x140a,
+    SpanishPanama = 0x180a,
+    SpanishDominicanRepublic = 0x1c0a,
+    SpanishVenezuela = 0x200a,
+    SpanishColombia = 0x240a,
+    SpanishPeru = 0x280a,
+    SpanishArgentina = 0x2c0a,
+    SpanishEcuador = 0x300a,
+    SpanishChile = 0x340a,
+    SpanishUruguay = 0x380a,
+    SpanishParaguay = 0x3c0a,
+    SpanishBolivia = 0x400a,
+    SpanishElSalvador = 0x440a,
+    SpanishHonduras = 0x480a,
+    SpanishNicaragua = 0x4c0a,
+    SpanishPuertoRico = 0x500a,
+    Sutu = 0x0430,
+    SwahiliKenya = 0x0441,
+    Swedish = 0x041d,
+    SwedishFinland = 0x081d,
+    Tamil = 0x0449,
+    TatarTatarstan = 0x0444,
+    Telugu = 0x044a,
+    Thai = 0x041e,
+    Turkish = 0x041f,
+    Ukrainian = 0x0422,
+    UrduPakistan = 0x0420,
+    UrduIndia = 0x0820,
+    UzbekLatin = 0x0443,
+    UzbekCyrillic = 0x0843,
+    Vietnamese = 0x042a,
+    HIDUsageDataDescriptor = 0x04ff,
+    HIDVendorDefined1 = 0xf0ff,
+    HIDVendorDefined2 = 0xf4ff,
+    HIDVendorDefined3 = 0xf8ff,
+    HIDVendorDefined4 = 0xfcff,
 }

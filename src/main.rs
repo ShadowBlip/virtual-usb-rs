@@ -5,46 +5,55 @@ pub mod virtual_usb;
 
 use std::{thread, time::Duration};
 
-use packed_struct::prelude::*;
-use usb::{ConfigurationDescriptor, InterfaceDescriptor};
+use usb::LangId;
 
 use crate::{
-    usb::{DeviceDescriptor, DeviceQualifierDescriptor},
-    virtual_usb::{Info, VirtualUSBDevice},
+    usb::{ConfigurationBuilder, HidInterfaceBuilder},
+    vhci_hcd::load_vhci_hcd,
+    virtual_usb::VirtualUSBDeviceBuilder,
 };
-
-#[derive(PackedStruct, Debug, Copy, Clone, PartialEq)]
-pub struct Configuration {
-    #[packed_field(element_size_bytes = "9")]
-    config_desc: ConfigurationDescriptor,
-
-    #[packed_field(element_size_bytes = "9")]
-    iface0_desc: InterfaceDescriptor,
-}
 
 fn main() {
     use simple_logger::SimpleLogger;
     SimpleLogger::new().init().unwrap();
 
-    //if let Err(e) = load_vhci_hcd() {
-    //    log::error!("{:?}", e);
-    //    return;
-    //}
-
-    // Create a new virtual usb device
-    let info = Info {
-        device_desc: DeviceDescriptor::new(0x1234, 0x5678),
-        device_qualifier_desc: DeviceQualifierDescriptor::new(),
-        config_descs: Vec::new(),
-        string_descs: Vec::new(),
-    };
-    let mut virtual_device = VirtualUSBDevice::new(info);
-    if let Err(e) = virtual_device.start() {
-        println!("Error: {e:?}");
+    if let Err(e) = load_vhci_hcd() {
+        log::error!("{:?}", e);
+        return;
     }
 
-    virtual_device.read();
+    // Create a virtual Steam Deck Controller
+    let mut virtual_device = VirtualUSBDeviceBuilder::new(0x28de, 0x1205)
+        .supported_langs(vec![LangId::EnglishUnitedStates])
+        .manufacturer("Valve Software")
+        .product("Steam Controller")
+        .max_packet_size(64)
+        .configuration(
+            ConfigurationBuilder::new()
+                .max_power(500)
+                .interface(HidInterfaceBuilder::new().build())
+                .build(),
+        )
+        .build();
+    if let Err(e) = virtual_device.start() {
+        println!("Error starting device: {e:?}");
+        return;
+    }
 
+    loop {
+        let xfer = match virtual_device.read() {
+            Ok(xfer) => xfer,
+            Err(e) => {
+                log::error!("Error reading from device: {e:?}");
+                break;
+            }
+        };
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    thread::sleep(Duration::from_secs(5));
+    println!("Dropping USB device");
+    drop(virtual_device);
     thread::sleep(Duration::from_secs(5));
     println!("Finished!");
 }

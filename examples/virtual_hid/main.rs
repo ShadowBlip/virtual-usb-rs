@@ -20,7 +20,7 @@ fn main() {
     let info = Info {
         device_desc: DeviceDescriptor::new(0x1234, 0x5678),
         device_qualifier_desc: DeviceQualifierDescriptor::new(),
-        config_descs: Vec::new(),
+        configs: Vec::new(),
         string_descs: Vec::new(),
     };
     let mut virtual_device = VirtualUSBDevice::new(info);
