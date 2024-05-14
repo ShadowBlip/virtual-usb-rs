@@ -14,9 +14,9 @@ use socketpair::{socketpair_stream, SocketpairStream};
 
 use crate::{
     usb::{
-        Configuration, DescriptorType, DeviceDescriptor, DeviceQualifierDescriptor, LangId,
-        Recipient, RecipientMask, Request, SelfPowered, SetupRequest, StringDescriptor, Type,
-        TypeMask,
+        Configuration, DescriptorType, DeviceClass, DeviceDescriptor, DeviceQualifierDescriptor,
+        LangId, Recipient, RecipientMask, Request, SelfPowered, SetupRequest, StringDescriptor,
+        Type, TypeMask,
     },
     usbip::{
         Driver, USBDeviceSpeed, USBIPCommandHeader, USBIPHeaderBasic, USBIPHeaderCmdSubmit,
@@ -668,6 +668,18 @@ impl VirtualUSBDeviceBuilder {
     /// Construct the new virtual USB device
     pub fn build(&self) -> VirtualUSBDevice {
         VirtualUSBDevice::new(self.info.clone())
+    }
+
+    /// Set the device class for the device
+    pub fn class(&mut self, class: DeviceClass) -> &mut Self {
+        self.info.device_desc.b_device_class = class as u8;
+        self
+    }
+
+    /// Set the device subclass for the device
+    pub fn subclass(&mut self, subclass: u8) -> &mut Self {
+        self.info.device_desc.b_device_sub_class = subclass;
+        self
     }
 
     /// Add the given supported languages

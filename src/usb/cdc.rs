@@ -1,6 +1,37 @@
 use packed_struct::prelude::*;
 
-use super::EndpointDescriptor;
+use super::{EndpointDescriptor, Interface, InterfaceClass};
+
+pub enum CdcSubclass {
+    None = 0x00,
+    DirectLineControlModel = 0x01,
+}
+
+/// [Interface] builder for constructing an CDC (Communication Device Class)
+/// interface descriptor.
+pub struct CdcInterfaceBuilder {
+    iface: Interface,
+}
+
+impl CdcInterfaceBuilder {
+    pub fn new() -> Self {
+        let mut iface = Interface::new();
+        iface.iface_desc.b_interface_class = InterfaceClass::Cdc as u8;
+
+        Self { iface }
+    }
+
+    /// Construct the new Interface configuration
+    pub fn build(&self) -> Interface {
+        self.iface.clone()
+    }
+
+    /// Set the interface subclass
+    pub fn subclass(&mut self, subclass: u8) -> &mut Self {
+        self.iface.iface_desc.b_interface_subclass = subclass;
+        self
+    }
+}
 
 pub struct CDC {
     header_func_descs: Vec<HeaderFunctionalDescriptor>,

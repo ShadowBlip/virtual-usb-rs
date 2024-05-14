@@ -101,6 +101,19 @@ pub enum DescriptorType {
     InterfacePower = 8,
 }
 
+/// Class code (assigned by the USB-IF).
+/// https://www.usb.org/defined-class-codes
+#[derive(PrimitiveEnum_u8, Debug, Copy, Clone, PartialEq)]
+pub enum DeviceClass {
+    UseInterface = 0x00,
+    Cdc = 0x02,
+    Hub = 0x09,
+    Billboard = 0x11,
+    Diagnostic = 0xdc,
+    Miscellaneous = 0xef,
+    VendorSpecific = 0xff,
+}
+
 /// The Device Descriptor is the root of the descriptor tree and contains basic
 /// device information. The unique numbers, idVendor and idProduct, identify the
 /// connected device. It is 18 bytes in size.
@@ -165,7 +178,7 @@ impl DeviceDescriptor {
             b_length: 18,
             b_descriptor_type: DescriptorType::Device as u8,
             bcd_usb: Integer::from_primitive(0x0200),
-            b_device_class: 0x03,
+            b_device_class: 0x00,
             b_device_sub_class: 0x00,
             b_device_protocol: 0x00,
             b_max_packet_size_0: 0x10,
@@ -259,23 +272,37 @@ impl Configuration {
         }
     }
 
+    /// Pack the configuration into a byte array
     pub fn pack_to_vec(&self) -> Result<Vec<u8>, PackingError> {
-        // Calculate the total size of the configuration
-        let mut config = self.conf_desc.clone();
-
-        // TODO: Get the size of the total configuration to allocate the
+        // Get the size of the total configuration to allocate the
         // byte array to the correct size.
-        let size = 9 + (9 * self.interfaces.len());
-
+        let size = self.get_size();
         let mut result: Vec<u8> = Vec::with_capacity(size);
-        let mut bytes = self.conf_desc.pack_to_vec()?;
+
+        // Update the config total size and num interfaces
+        let mut config = self.conf_desc.clone();
+        config.b_num_interfaces = self.interfaces.len() as u8;
+        config.w_total_length = Integer::from_primitive(size as u16);
+
+        // Pack the config descriptor
+        let mut bytes = config.pack_to_vec()?;
         result.append(&mut bytes);
 
+        // Pack and append each interface descriptor
         for iface in self.interfaces.iter() {
             result.append(&mut iface.pack_to_vec()?);
         }
 
         Ok(result)
+    }
+
+    /// Returns the byte serialized size of the configuration
+    pub fn get_size(&self) -> usize {
+        let mut size = 9;
+        for iface in self.interfaces.iter() {
+            size += iface.get_size();
+        }
+        return size;
     }
 }
 
@@ -390,71 +417,67 @@ impl ConfigurationDescriptor {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Interface {
     iface_desc: InterfaceDescriptor,
-    header_func_descs: Vec<HeaderFunctionalDescriptor>,
-    call_management_func_descs: Vec<CallManagementFunctionalDescriptor>,
-    acm_func_descs: Vec<AbstractControlManagementFunctionalDescriptor>,
-    union_func_descs: Vec<UnionFunctionalDescriptor>,
-    endpoint_descs: Vec<EndpointDescriptor>,
+    data: Vec<u8>,
 }
 
 impl Interface {
     /// Create a new interface descriptor
     pub fn new() -> Self {
-        Self::new()
+        Self {
+            iface_desc: InterfaceDescriptor::new(),
+            data: Vec::new(),
+        }
     }
 
     /// Serialize the interface into bytes
     pub fn pack_to_vec(&self) -> Result<Vec<u8>, PackingError> {
-        // TODO: Get the size of the total configuration to allocate the
+        // Get the size of the total interface configuration to allocate the
         // byte array to the correct size.
-        let size = 9;
+        let size = 9 + self.data.len();
 
         let mut result: Vec<u8> = Vec::with_capacity(size);
         let mut bytes = self.iface_desc.pack_to_vec()?;
         result.append(&mut bytes);
-
-        //for iface in self.interfaces {
-        //    result.append(iface.pack_to_vec()?);
-        //}
+        let mut data = self.data.clone();
+        result.append(&mut data);
 
         return Ok(result);
     }
 
     /// Returns the byte serialized size of the interface
     pub fn get_size(&self) -> usize {
-        return 0;
+        return 9 + self.data.len();
     }
 }
 
+/// USB defines class code information that is used to identify a device’s
+/// functionality and to nominally load a device driver based on that
+/// functionality.
+/// Source: https://www.usb.org/defined-class-codes
 #[derive(PrimitiveEnum_u8, Debug, Copy, Clone, PartialEq)]
 pub enum InterfaceClass {
+    Audio = 0x01,
+    Cdc = 0x02,
     Hid = 0x03,
-}
-
-/// [Interface] builder for constructing an HID (Human Interface Device)
-/// interface descriptor.
-pub struct HidInterfaceBuilder {
-    iface: Interface,
-}
-
-impl HidInterfaceBuilder {
-    pub fn new() -> Self {
-        let mut iface = Interface::new();
-        iface.iface_desc.b_interface_class = InterfaceClass::Hid as u8;
-
-        Self { iface }
-    }
-
-    /// Construct the new Interface configuration
-    pub fn build(&self) -> Interface {
-        self.iface.clone()
-    }
-
-    /// Set the interface subclass
-    pub fn subclass(&mut self, subclass: u8) -> &mut Self {
-        self.iface.iface_desc.b_interface_subclass = subclass;
-        self
-    }
+    Physical = 0x05,
+    Image = 0x06,
+    Printer = 0x07,
+    MassStorage = 0x08,
+    CdcData = 0x0a,
+    SmartCard = 0x0b,
+    ContentSecurity = 0x0d,
+    Video = 0x0e,
+    PersonalHealthcare = 0x0f,
+    AudioVideo = 0x10,
+    UsbTypeCBridge = 0x12,
+    UsbBulkDisplayProtocol = 0x13,
+    MctpOverUsbProtocol = 0x14,
+    I3C = 0x3c,
+    Diagnostic = 0xdc,
+    WirelessController = 0xe0,
+    Miscellaneous = 0xef,
+    ApplicationSpecific = 0xfe,
+    VendorSpecific = 0xff,
 }
 
 #[derive(PackedStruct, Debug, Copy, Clone, PartialEq)]
@@ -488,6 +511,22 @@ pub struct InterfaceDescriptor {
     /// Index of string descriptor describing this interface.
     #[packed_field(bytes = "8")]
     pub i_interface: u8,
+}
+
+impl InterfaceDescriptor {
+    pub fn new() -> Self {
+        Self {
+            b_length: 9,
+            b_descriptor_type: DescriptorType::Interface as u8,
+            b_interface_number: 0,
+            b_alternate_setting: 0,
+            b_num_endpoints: 1,
+            b_interface_class: 0,
+            b_interface_subclass: 0,
+            b_interface_protocol: 0,
+            i_interface: 0,
+        }
+    }
 }
 
 #[derive(PackedStruct, Debug, Copy, Clone, PartialEq)]
