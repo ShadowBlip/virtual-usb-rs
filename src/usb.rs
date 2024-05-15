@@ -14,6 +14,10 @@ use self::cdc::{
     HeaderFunctionalDescriptor, UnionFunctionalDescriptor,
 };
 
+pub const ENDPOINT_MAX_COUNT_OUT: u8 = 16;
+pub const ENDPOINT_MAX_COUNT_IN: u8 = 16;
+pub const ENDPOINT_MAX_COUNT: u8 = 32;
+
 /// Request type (bRequest)
 #[derive(PrimitiveEnum_u8, Debug, Copy, Clone, PartialEq)]
 pub enum Request {
@@ -39,33 +43,27 @@ pub enum RequestType {
     Recipient(Recipient),
 }
 
-pub const DirectionMask: u8 = 0x80;
+/// Request direction. This is always from the perspective of the host (i.e. host computer)
+#[derive(PrimitiveEnum_u8, Debug, Copy, Clone, PartialEq)]
 pub enum Direction {
-    Out = 0x00,
-    In = 0x80,
+    Out = 0,
+    In = 1,
 }
 
-pub const TypeMask: u8 = 0x60;
+#[derive(PrimitiveEnum_u8, Debug, Copy, Clone, PartialEq)]
 pub enum Type {
-    Standard = 0x00,
-    Class = 0x20,
-    Vendor = 0x40,
-    Reserved = 0x60,
+    Standard = 0,
+    Class = 1,
+    Vendor = 2,
+    Reserved = 3,
 }
 
-pub const RecipientMask: u8 = 0x1F;
-#[derive(Copy, Clone)]
+#[derive(PrimitiveEnum_u8, Debug, Copy, Clone, PartialEq)]
 pub enum Recipient {
     Device = 0x00,
     Interface = 0x01,
     Endpoint = 0x02,
     Other = 0x03,
-}
-
-impl Recipient {
-    pub fn as_u8(&self) -> u8 {
-        *self as u8
-    }
 }
 
 // Configuration Characteristics
@@ -76,14 +74,23 @@ pub const SelfPowered: u8 = 1 << 6;
 #[derive(PackedStruct, Debug, Copy, Clone, PartialEq)]
 #[packed_struct(bit_numbering = "msb0", size_bytes = "8")]
 pub struct SetupRequest {
-    #[packed_field(bytes = "0")]
-    pub bm_request_type: u8,
+    /// byte 0
+    #[packed_field(bits = "0", ty = "enum")]
+    pub bm_request_type_direction: Direction,
+    #[packed_field(bits = "1..=2", ty = "enum")]
+    pub bm_request_type_kind: Type,
+    #[packed_field(bits = "3..=7", ty = "enum")]
+    pub bm_request_type_recipient: Recipient,
+    // byte 1
     #[packed_field(bytes = "1", ty = "enum")]
     pub b_request: Request,
+    // byte 2-3
     #[packed_field(bytes = "2..=3", endian = "lsb")]
     pub w_value: Integer<u16, packed_bits::Bits<16>>,
+    // byte 4-5
     #[packed_field(bytes = "4..=5", endian = "lsb")]
     pub w_index: Integer<u16, packed_bits::Bits<16>>,
+    // byte 6-7
     #[packed_field(bytes = "6..=7", endian = "lsb")]
     pub w_length: Integer<u16, packed_bits::Bits<16>>,
 }
@@ -343,7 +350,11 @@ impl ConfigurationBuilder {
     }
 
     /// Set the interface for this configuration
-    pub fn interface(&mut self, interface: Interface) -> &mut Self {
+    pub fn interface(&mut self, mut interface: Interface) -> &mut Self {
+        // Set the interface number
+        interface.iface_desc.b_interface_number = self.config.interfaces.len() as u8;
+
+        // Add the interface to the config and update the number of interfaces
         self.config.interfaces.push(interface);
         self.config.conf_desc.b_num_interfaces = self.config.interfaces.len() as u8;
 
@@ -406,9 +417,9 @@ impl ConfigurationDescriptor {
             b_descriptor_type: DescriptorType::Configuration as u8,
             w_total_length: Integer::from_primitive(0),
             b_num_interfaces: 0,
-            b_configuration_value: 0,
+            b_configuration_value: 1,
             i_configuration: 0,
-            bm_attributes: 0,
+            bm_attributes: 0x80,
             b_max_power: 0,
         }
     }
@@ -500,8 +511,8 @@ pub struct InterfaceDescriptor {
     #[packed_field(bytes = "4")]
     pub b_num_endpoints: u8,
     /// Class code (assigned by the USB-IF).
-    #[packed_field(bytes = "5")]
-    pub b_interface_class: u8,
+    #[packed_field(bytes = "5", ty = "enum")]
+    pub b_interface_class: InterfaceClass,
     /// Subclass code (assigned by the USB-IF).
     #[packed_field(bytes = "6")]
     pub b_interface_subclass: u8,
@@ -521,12 +532,100 @@ impl InterfaceDescriptor {
             b_interface_number: 0,
             b_alternate_setting: 0,
             b_num_endpoints: 1,
-            b_interface_class: 0,
+            b_interface_class: InterfaceClass::Hid,
             b_interface_subclass: 0,
             b_interface_protocol: 0,
             i_interface: 0,
         }
     }
+}
+
+/// [EndpointDescriptor] builder for constructing an endpoint descriptor
+pub struct EndpointBuilder {
+    descriptor: EndpointDescriptor,
+}
+
+impl EndpointBuilder {
+    pub fn new() -> Self {
+        Self {
+            descriptor: EndpointDescriptor::new(),
+        }
+    }
+
+    /// Construct the new Endpoint configuration.
+    pub fn build(&self) -> EndpointDescriptor {
+        self.descriptor.clone()
+    }
+
+    /// Set the endpoint address number. Should be greater than 0.
+    pub fn address_num(&mut self, num: u8) -> &mut Self {
+        self.descriptor.b_endpoint_address_num = Integer::from_primitive(num);
+        self
+    }
+
+    /// Set the endpoint direction
+    pub fn direction(&mut self, direction: Direction) -> &mut Self {
+        self.descriptor.b_endpoint_address_direction = direction == Direction::In;
+        self
+    }
+
+    /// Set the endpoint transfer type
+    pub fn transfer_type(&mut self, xfer_type: TransferType) -> &mut Self {
+        self.descriptor.bm_attributes_xfer_type = xfer_type;
+        self
+    }
+
+    /// Set the endpoint synchronization type
+    pub fn sync_type(&mut self, sync_type: SynchronizationType) -> &mut Self {
+        self.descriptor.bm_attributes_sync_type = sync_type;
+        self
+    }
+
+    /// Set the endpoint usage type
+    pub fn usage_type(&mut self, usage_type: UsageType) -> &mut Self {
+        self.descriptor.bm_attributes_usage_type = usage_type;
+        self
+    }
+
+    /// Set the endpoint max packet size
+    pub fn max_packet_size(&mut self, size: u16) -> &mut Self {
+        self.descriptor.w_max_packet_size = Integer::from_primitive(size);
+        self
+    }
+
+    /// Interval for polling endpoint for data transfers. Expressed in frames
+    /// or micro-frames depending on the operating speed (1ms, or 125μs units).
+    pub fn interval(&mut self, interval: u8) -> &mut Self {
+        self.descriptor.b_interval = interval;
+        self
+    }
+}
+
+/// Transfer type
+#[derive(PrimitiveEnum_u8, Debug, Copy, Clone, PartialEq)]
+pub enum TransferType {
+    Control = 0,
+    Isochronous = 1,
+    Bulk = 2,
+    Interrupt = 3,
+}
+
+/// Synchronization type
+#[derive(PrimitiveEnum_u8, Debug, Copy, Clone, PartialEq)]
+pub enum SynchronizationType {
+    NoSynchronization = 0,
+    Asynchronous = 1,
+    Adaptive = 2,
+    Synchronous = 3,
+}
+
+/// Usage type
+#[derive(PrimitiveEnum_u8, Debug, Copy, Clone, PartialEq)]
+pub enum UsageType {
+    Data = 0,
+    Feedback = 1,
+    ImplicitFeedback = 2,
+    Reserved = 3,
 }
 
 #[derive(PackedStruct, Debug, Copy, Clone, PartialEq)]
@@ -536,8 +635,9 @@ pub struct EndpointDescriptor {
     #[packed_field(bytes = "0")]
     pub b_length: u8,
     /// Endpoint Descriptor Type = 5.
-    #[packed_field(bytes = "1")]
-    pub b_descriptor_type: u8,
+    #[packed_field(bytes = "1", ty = "enum")]
+    pub b_descriptor_type: DescriptorType,
+    /// Byte 2
     /// The address of the endpoint on the USB device described by this
     /// descriptor. The address is encoded as follows:
     ///
@@ -546,8 +646,13 @@ pub struct EndpointDescriptor {
     /// * Bit 7: Direction, ignored for control endpoints.
     ///   * 0 = OUT endpoint
     ///   * 1 = IN endpoint
-    #[packed_field(bytes = "2")]
-    pub b_endpoint_address: u8,
+    #[packed_field(bits = "16")]
+    pub b_endpoint_address_direction: bool, // True == IN, False == OUT
+    #[packed_field(bits = "17..=19", endian = "lsb")]
+    pub b_endpoint_address_reserved: Integer<u8, packed_bits::Bits<3>>,
+    #[packed_field(bits = "20..=23", endian = "lsb")]
+    pub b_endpoint_address_num: Integer<u8, packed_bits::Bits<4>>,
+    /// Byte 3
     /// The endpoint attribute when configured through bConfigurationValue.
     ///
     /// * Bits 1..0: Transfer Type
@@ -571,8 +676,14 @@ pub struct EndpointDescriptor {
     ///   * 11 = Reserved
     ///
     /// All other bits are reserved and must be reset to zero.
-    #[packed_field(bytes = "3")]
-    pub bm_attributes: u8,
+    #[packed_field(bits = "24..=25")]
+    pub bm_attributes_reserved: Integer<u8, packed_bits::Bits<2>>,
+    #[packed_field(bits = "26..=27", ty = "enum")]
+    pub bm_attributes_usage_type: UsageType,
+    #[packed_field(bits = "28..=29", ty = "enum")]
+    pub bm_attributes_sync_type: SynchronizationType,
+    #[packed_field(bits = "30..=31", ty = "enum")]
+    pub bm_attributes_xfer_type: TransferType,
     /// Is the maximum packet size of this endpoint. For isochronous endpoints,
     /// this value is used to reserve the time on the bus, required for the
     /// per-(micro)frame data payloads.
@@ -595,6 +706,24 @@ pub struct EndpointDescriptor {
     pub b_interval: u8,
 }
 
+impl EndpointDescriptor {
+    pub fn new() -> Self {
+        Self {
+            b_length: 7,
+            b_descriptor_type: DescriptorType::Endpoint,
+            b_endpoint_address_num: Integer::from_primitive(1),
+            b_endpoint_address_reserved: Integer::from_primitive(0),
+            b_endpoint_address_direction: false,
+            bm_attributes_xfer_type: TransferType::Control,
+            bm_attributes_sync_type: SynchronizationType::NoSynchronization,
+            bm_attributes_usage_type: UsageType::Data,
+            bm_attributes_reserved: Integer::from_primitive(0),
+            w_max_packet_size: Integer::from_primitive(0),
+            b_interval: 1,
+        }
+    }
+}
+
 /// String descriptors are optional and add human readable information to the
 /// other descriptors. If a device does not support string descriptors, all
 /// references to string descriptors within device, configuration, and interface
@@ -611,7 +740,7 @@ pub struct StringDescriptor {
 impl StringDescriptor {
     pub fn pack_to_vec(&self) -> Result<Vec<u8>, PackingError> {
         let b_length = self.data.len() as u8 + 2;
-        let b_descriptor_type = DescriptorType::String as u8;
+        let b_descriptor_type = DescriptorType::String.to_primitive();
         let mut str_bytes = self.data.clone();
         if self.data.len() > 126 {
             return Err(PackingError::InvalidValue);

@@ -17,10 +17,15 @@ pub const USBIP_CMD_SUBMIT: u32 = 1;
 pub const USBIP_CMD_UNLINK: u32 = 2;
 pub const USBIP_RET_SUBMIT: u32 = 3;
 pub const USBIP_RET_UNLINK: u32 = 4;
-pub const USBIP_DIR_OUT: u32 = 0;
-pub const USBIP_DIR_IN: u32 = 1;
 pub const USBIP_VHCI_BUS_TYPE: &str = "platform";
 pub const USBIP_VHCI_DEVICE_NAME: &str = "vhci_hcd.0";
+
+/// Request direction. This is always from the perspective of the host (i.e. host computer)
+#[derive(PrimitiveEnum_u32, Debug, Copy, Clone, PartialEq)]
+pub enum UsbIpDirection {
+    Out = 0,
+    In = 1,
+}
 
 /// Available USB Hub speeds
 pub enum HubSpeed {
@@ -124,8 +129,8 @@ pub struct USBIPHeaderBasic {
     pub seqnum: Integer<u32, packed_bits::Bits<32>>,
     #[packed_field(bytes = "8..=11", endian = "msb")]
     pub devid: Integer<u32, packed_bits::Bits<32>>,
-    #[packed_field(bytes = "12..=15", endian = "msb")]
-    pub direction: Integer<u32, packed_bits::Bits<32>>,
+    #[packed_field(bytes = "12..=15", endian = "msb", ty = "enum")]
+    pub direction: UsbIpDirection,
     #[packed_field(bytes = "16..=19", endian = "msb")]
     pub ep: Integer<u32, packed_bits::Bits<32>>,
 }

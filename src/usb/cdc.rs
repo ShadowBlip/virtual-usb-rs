@@ -16,7 +16,7 @@ pub struct CdcInterfaceBuilder {
 impl CdcInterfaceBuilder {
     pub fn new() -> Self {
         let mut iface = Interface::new();
-        iface.iface_desc.b_interface_class = InterfaceClass::Cdc as u8;
+        iface.iface_desc.b_interface_class = InterfaceClass::Cdc;
 
         Self { iface }
     }
