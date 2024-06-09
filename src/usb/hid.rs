@@ -3,7 +3,155 @@
 
 use packed_struct::prelude::*;
 
-use super::{EndpointDescriptor, Interface, InterfaceClass};
+use super::{
+    Direction, EndpointDescriptor, Interface, InterfaceClass, Recipient, SetupRequest,
+    StandardRequest, Type,
+};
+
+/// HID class-specific descriptor request type (wValue)
+#[derive(PrimitiveEnum_u8, Debug, Copy, Clone, PartialEq)]
+pub enum HidDescriptorType {
+    Hid = 0x21,
+    Report = 0x22,
+    Physical = 0x23,
+}
+
+/// GetDescriptor representation of a SetupRequest for Human Interface Devices
+#[derive(PackedStruct, Debug, Copy, Clone, PartialEq)]
+#[packed_struct(bit_numbering = "msb0", size_bytes = "8")]
+pub struct HidGetDescriptorRequest {
+    /// byte 0
+    #[packed_field(bits = "0", ty = "enum")]
+    pub bm_request_type_direction: Direction,
+    #[packed_field(bits = "1..=2", ty = "enum")]
+    pub bm_request_type_kind: Type,
+    #[packed_field(bits = "3..=7", ty = "enum")]
+    pub bm_request_type_recipient: Recipient,
+    // byte 1
+    #[packed_field(bytes = "1", ty = "enum")]
+    pub b_request: StandardRequest,
+    // byte 2-3 (wValue)
+    #[packed_field(bytes = "2")]
+    pub b_descriptor_index: u8,
+    #[packed_field(bytes = "3", ty = "enum")]
+    pub b_descriptor_type: HidDescriptorType,
+    // byte 4-5 (wIndex)
+    #[packed_field(bytes = "4..=5", endian = "lsb")]
+    pub w_interface_number: Integer<u16, packed_bits::Bits<16>>,
+    // byte 6-7 (wLength)
+    #[packed_field(bytes = "6..=7", endian = "lsb")]
+    pub w_descriptor_length: Integer<u16, packed_bits::Bits<16>>,
+}
+
+impl From<SetupRequest> for HidGetDescriptorRequest {
+    fn from(value: SetupRequest) -> Self {
+        let data = value.pack().unwrap();
+        HidGetDescriptorRequest::unpack(&data).unwrap()
+    }
+}
+
+/// HID class-specific request type (bRequest)
+#[derive(PrimitiveEnum_u8, Debug, Copy, Clone, PartialEq)]
+pub enum HidRequestType {
+    Unknown = 0x00,
+    /// The Get_Report request allows the host to receive a report via the Control pipe.
+    GetReport = 0x01,
+    /// The Get_Idle request reads the current idle rate for a particular Input report (see:
+    /// Set_Idle request).
+    GetIdle = 0x02,
+    /// The Get_Protocol request reads which protocol is currently active (either the boot
+    /// protocol or the report protocol.)
+    GetProtocol = 0x03,
+    _Reverved0 = 0x04,
+    _Reverved1 = 0x05,
+    _Reverved2 = 0x06,
+    _Reverved3 = 0x07,
+    _Reverved4 = 0x08,
+    /// The Set_Report request allows the host to send a report to the device, possibly
+    /// setting the state of input, output, or feature controls.
+    SetReport = 0x09,
+    /// The Set_Idle request silences a particular report on the Interrupt In pipe until a
+    /// new event occurs or the specified amount of time passes
+    SetIdle = 0x0a,
+    /// The Set_Protocol switches between the boot protocol and the report protocol (or
+    /// vice versa).
+    SetProtocol = 0x0b,
+}
+
+impl From<StandardRequest> for HidRequestType {
+    fn from(value: StandardRequest) -> Self {
+        match value.to_primitive() {
+            0x01 => Self::GetReport,
+            0x02 => Self::GetIdle,
+            0x03 => Self::GetProtocol,
+            0x04 => Self::_Reverved0,
+            0x05 => Self::_Reverved1,
+            0x06 => Self::_Reverved2,
+            0x07 => Self::_Reverved3,
+            0x08 => Self::_Reverved4,
+            0x09 => Self::SetReport,
+            0x0a => Self::SetIdle,
+            0x0b => Self::SetProtocol,
+            _ => Self::Unknown,
+        }
+    }
+}
+
+/// A Human Interface Device (HID) USB request
+pub enum HidRequest {
+    Unknown,
+    SetIdle(HidSetIdleRequest),
+}
+
+// TODO: implement TryFrom instead
+impl From<SetupRequest> for HidRequest {
+    fn from(setup: SetupRequest) -> Self {
+        let request_type = HidRequestType::from(setup.b_request);
+        match request_type {
+            HidRequestType::GetReport => todo!(),
+            HidRequestType::GetIdle => todo!(),
+            HidRequestType::GetProtocol => todo!(),
+            HidRequestType::SetReport => todo!(),
+            HidRequestType::SetIdle => Self::SetIdle(setup.into()),
+            HidRequestType::SetProtocol => todo!(),
+            _ => Self::Unknown,
+        }
+    }
+}
+
+/// GetReport request
+#[derive(PackedStruct, Debug, Copy, Clone, PartialEq)]
+#[packed_struct(bit_numbering = "msb0", size_bytes = "8")]
+pub struct HidSetIdleRequest {
+    /// byte 0
+    #[packed_field(bits = "0", ty = "enum")]
+    pub bm_request_type_direction: Direction,
+    #[packed_field(bits = "1..=2", ty = "enum")]
+    pub bm_request_type_kind: Type,
+    #[packed_field(bits = "3..=7", ty = "enum")]
+    pub bm_request_type_recipient: Recipient,
+    // byte 1
+    #[packed_field(bytes = "1", ty = "enum")]
+    pub b_request: HidRequestType,
+    // byte 2-3 (wValue)
+    #[packed_field(bytes = "2")]
+    pub report_id: u8,
+    #[packed_field(bytes = "3")]
+    pub duration: u8,
+    // byte 4-5 (wIndex)
+    #[packed_field(bytes = "4..=5", endian = "lsb")]
+    pub interface: Integer<u16, packed_bits::Bits<16>>,
+    // byte 6-7 (wLength)
+    #[packed_field(bytes = "6..=7", endian = "lsb")]
+    pub _unused: Integer<u16, packed_bits::Bits<16>>,
+}
+
+impl From<SetupRequest> for HidSetIdleRequest {
+    fn from(value: SetupRequest) -> Self {
+        let data = value.pack().unwrap();
+        HidSetIdleRequest::unpack(&data).unwrap()
+    }
+}
 
 /// Subclass codes for HID descriptors
 pub enum HidSubclass {
@@ -111,6 +259,12 @@ impl HidInterfaceBuilder {
     }
 }
 
+impl Default for HidInterfaceBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(PackedStruct, Debug, Copy, Clone, PartialEq)]
 #[packed_struct(bit_numbering = "msb0", size_bytes = "6")]
 pub struct HidDescriptor {
@@ -144,6 +298,12 @@ impl HidDescriptor {
     }
 }
 
+impl Default for HidDescriptor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(PrimitiveEnum_u8, Debug, Copy, Clone, PartialEq)]
 pub enum DescriptorType {
     Report = 34,
@@ -164,5 +324,11 @@ impl HidReportDescriptor {
             b_descriptor_type: DescriptorType::Report,
             w_descriptor_length: Integer::from_primitive(0),
         }
+    }
+}
+
+impl Default for HidReportDescriptor {
+    fn default() -> Self {
+        Self::new()
     }
 }

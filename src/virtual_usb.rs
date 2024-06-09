@@ -14,9 +14,9 @@ use socketpair::{socketpair_stream, SocketpairStream};
 
 use crate::{
     usb::{
-        Configuration, DescriptorType, DeviceClass, DeviceDescriptor, DeviceQualifierDescriptor,
-        LangId, Recipient, Request, SelfPowered, SetupRequest, StringDescriptor, Type,
-        ENDPOINT_MAX_COUNT,
+        hid::HidGetDescriptorRequest, Configuration, DescriptorType, DeviceClass, DeviceDescriptor,
+        DeviceQualifierDescriptor, InterfaceClass, LangId, Recipient, SetupRequest,
+        StandardRequest, StringDescriptor, Type, ENDPOINT_MAX_COUNT, SELF_POWERED,
     },
     usbip::{
         Driver, USBDeviceSpeed, USBIPCommandHeader, USBIPHeaderBasic, USBIPHeaderCmdSubmit,
@@ -53,11 +53,11 @@ pub struct Reply {
 #[derive(Debug)]
 pub struct Xfer {
     /// Endpoint
-    ep: u8,
+    pub ep: u8,
     /// Setup
-    setup: Option<SetupRequest>,
+    pub setup: Option<SetupRequest>,
     /// USB Transfer data
-    data: Vec<u8>,
+    pub data: Vec<u8>,
 }
 
 /// Virtual USB Device
@@ -255,15 +255,14 @@ impl VirtualUSBDevice {
         let USBIPCommandHeader::CmdSubmit(header) = cmd.header else {
             return Err("Invalid header for submit command".into());
         };
-        match header.base.direction.to_primitive() {
+        match header.base.direction {
             // OUT command (data from host->device)
-            USBIP_DIR_OUT => self.handle_command_submit_epX_out(cmd),
+            UsbIpDirection::Out => self.handle_command_submit_epX_out(cmd),
             // IN command (data from device->host)
-            USBIP_DIR_IN => {
+            UsbIpDirection::In => {
                 self.handle_command_submit_epX_in(cmd)?;
                 Ok(None)
             }
-            _ => Err("Unknown submit command direction".into()),
         }
     }
 
@@ -301,7 +300,7 @@ impl VirtualUSBDevice {
             return Err("Invalid header for submit command".into());
         };
         let ep_idx = header.base.ep.to_primitive();
-        log::debug!("handle submit epX OUT {ep_idx}");
+        log::debug!("handle submit epX IN {ep_idx}");
         if ep_idx >= ENDPOINT_MAX_COUNT as u32 {
             return Err("Invalid endpoint index".into());
         }
@@ -312,6 +311,8 @@ impl VirtualUSBDevice {
     fn send_data_for_in_endpoint(&self, cmd: &Command) -> Result<(), Box<dyn Error>> {
         // TODO: Implement this
         log::error!("Not implemented!");
+
+        //self.reply(cmd, data, status);
         todo!();
         Ok(())
     }
@@ -341,18 +342,67 @@ impl VirtualUSBDevice {
         };
 
         // TODO: We only support requests to the device for now
+        let direction = header.base.direction;
         let recipient = req.bm_request_type_recipient;
         if recipient != Recipient::Device {
+            match recipient {
+                Recipient::Interface => match direction {
+                    UsbIpDirection::In => match req.b_request {
+                        StandardRequest::GetDescriptor => {
+                            // Get the interface descriptor this request is for
+                            let Some(config) = self.current_config.as_ref() else {
+                                let err =
+                                    "No current configuration set to get interface descriptor";
+                                return Err(err.into());
+                            };
+
+                            // Get the interface descriptor from the config
+                            let idx = req.w_index.to_primitive() as usize;
+                            let Some(iface) = config.interfaces.get(idx) else {
+                                let err = format!("No interface exists in config with index {idx}");
+                                return Err(err.into());
+                            };
+
+                            // Check to see if it is an HID interface
+                            match iface.get_class() {
+                                InterfaceClass::Hid => {
+                                    log::debug!("Get descriptor for HID!");
+                                    let request = HidGetDescriptorRequest::from(req);
+                                }
+                                _ => todo!(),
+                            }
+                        }
+                        _ => todo!(),
+                    },
+                    UsbIpDirection::Out => todo!(),
+                },
+                Recipient::Device => todo!(),
+                Recipient::Endpoint => todo!(),
+                Recipient::Other => todo!(),
+            }
+
             log::warn!("unhandled recipient: {:?}", recipient);
-            return Ok(());
-            //return Err(format!("invalid recipient: {}", recipient).into());
+            // TODO: Looks like it's asking for an HID report:
+            //
+            // Hex
+            // [0x81, 0x6, 0x0, 0x22, 0x0, 0x0, 0x41, 0x0]
+            //
+            //  bm_request_type_direction | bits   0:0   | 0b1                | "In"
+            //       bm_request_type_kind | bits   1:2   | 0b00               | "Standard"
+            //  bm_request_type_recipient | bits   3:7   | 0b00001            | "Interface"
+            //                  b_request | bits   8:15  | 0b00000110         | "GetDescriptor"
+            //                    w_value | bits  16:31  | 0b0000000000100010 | "8704"
+            //                    w_index | bits  32:47  | 0b0000000000000000 | "0"
+            //                   w_length | bits  48:63  | 0b0100000100000000 | "65"
+            //return Ok(());
+            return Err(format!("invalid recipient: {:?}", recipient).into());
         }
 
         // Handle the command based on the direction
-        match header.base.direction {
+        match direction {
             // IN command (data from device->host)
             UsbIpDirection::In => match req.b_request {
-                Request::GetStatus => {
+                StandardRequest::GetStatus => {
                     log::debug!("USB Request: GetStatus");
                     let Some(config) = self.current_config.as_ref() else {
                         return Err("No active configuration".to_string().into());
@@ -361,7 +411,7 @@ impl VirtualUSBDevice {
                     let bm_attributes = config.conf_desc.bm_attributes;
 
                     // If self-powered, bit 0 is 1
-                    let self_powered = bm_attributes & SelfPowered;
+                    let self_powered = bm_attributes & SELF_POWERED;
                     if self_powered == 1 {
                         reply |= 1;
                     }
@@ -371,7 +421,7 @@ impl VirtualUSBDevice {
                     self.reply(cmd, &data, 0)?;
                     Ok(())
                 }
-                Request::GetDescriptor => {
+                StandardRequest::GetDescriptor => {
                     log::debug!("USB Request: GetDescriptor");
                     // Get the descriptor type
                     let desc_type = (req.w_value.to_primitive() & 0xFF00) >> 8;
@@ -436,7 +486,7 @@ impl VirtualUSBDevice {
                     self.reply(cmd, data.as_slice(), status)?;
                     Ok(())
                 }
-                Request::SetConfiguration => {
+                StandardRequest::SetConfiguration => {
                     log::debug!("USB Request: SetConfiguration");
                     let config_val = req.w_value.to_primitive() & 0x00FF;
                     let mut ok = false;
@@ -468,7 +518,7 @@ impl VirtualUSBDevice {
                 }
 
                 match req.b_request {
-                    Request::SetConfiguration => {
+                    StandardRequest::SetConfiguration => {
                         log::debug!("USB Request: SetConfiguration");
                         let config_val = req.w_value.to_primitive() & 0x00FF;
                         let mut ok = false;

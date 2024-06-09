@@ -1,18 +1,13 @@
 //! Reference:
 //! https://github.com/toasterllc/Toastbox/blob/d3b1770c6816eb648ee2e0a754c2dd9c3bd5342f/USB.h
 
-#![allow(warnings)]
+//#![allow(warnings)]
 pub mod cdc;
 pub mod hid;
 
-use std::{error::Error, fmt::Display};
+use std::fmt::Display;
 
 use packed_struct::prelude::*;
-
-use self::cdc::{
-    AbstractControlManagementFunctionalDescriptor, CallManagementFunctionalDescriptor,
-    HeaderFunctionalDescriptor, UnionFunctionalDescriptor,
-};
 
 pub const ENDPOINT_MAX_COUNT_OUT: u8 = 16;
 pub const ENDPOINT_MAX_COUNT_IN: u8 = 16;
@@ -20,7 +15,7 @@ pub const ENDPOINT_MAX_COUNT: u8 = 32;
 
 /// Request type (bRequest)
 #[derive(PrimitiveEnum_u8, Debug, Copy, Clone, PartialEq)]
-pub enum Request {
+pub enum StandardRequest {
     GetStatus = 0,
     ClearFeature = 1,
     _Reserved0 = 2,
@@ -34,13 +29,6 @@ pub enum Request {
     GetInterface = 10,
     SetInterface = 11,
     SynchFrame = 12,
-}
-
-/// Request type (bmRequestType)
-pub enum RequestType {
-    Direction(Direction),
-    Type(Type),
-    Recipient(Recipient),
 }
 
 /// Request direction. This is always from the perspective of the host (i.e. host computer)
@@ -67,8 +55,8 @@ pub enum Recipient {
 }
 
 // Configuration Characteristics
-pub const RemoteWakeup: u8 = 1 << 5;
-pub const SelfPowered: u8 = 1 << 6;
+pub const REMOTE_WAKEUP: u8 = 1 << 5;
+pub const SELF_POWERED: u8 = 1 << 6;
 
 /// Setup Request
 #[derive(PackedStruct, Debug, Copy, Clone, PartialEq)]
@@ -83,7 +71,7 @@ pub struct SetupRequest {
     pub bm_request_type_recipient: Recipient,
     // byte 1
     #[packed_field(bytes = "1", ty = "enum")]
-    pub b_request: Request,
+    pub b_request: StandardRequest,
     // byte 2-3
     #[packed_field(bytes = "2..=3", endian = "lsb")]
     pub w_value: Integer<u16, packed_bits::Bits<16>>,
@@ -200,6 +188,12 @@ impl DeviceDescriptor {
     }
 }
 
+impl Default for DeviceDescriptor {
+    fn default() -> Self {
+        Self::new(0x1234, 0x5678)
+    }
+}
+
 /// A high-speed capable device that has different device information for
 /// full-speed and high-speed must have a Device Qualifier Descriptor. For
 /// example, if the device is currently operating at full-speed, the Device
@@ -263,6 +257,12 @@ impl DeviceQualifierDescriptor {
     }
 }
 
+impl Default for DeviceQualifierDescriptor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// Configuration is a higher-level structure for building a USB payload from
 /// [ConfigurationDescriptor] and one or more [InterfaceDescriptor].
 #[derive(Debug, Clone, PartialEq)]
@@ -287,7 +287,7 @@ impl Configuration {
         let mut result: Vec<u8> = Vec::with_capacity(size);
 
         // Update the config total size and num interfaces
-        let mut config = self.conf_desc.clone();
+        let mut config = self.conf_desc;
         config.b_num_interfaces = self.interfaces.len() as u8;
         config.w_total_length = Integer::from_primitive(size as u16);
 
@@ -309,7 +309,7 @@ impl Configuration {
         for iface in self.interfaces.iter() {
             size += iface.get_size();
         }
-        return size;
+        size
     }
 }
 
@@ -369,6 +369,12 @@ impl ConfigurationBuilder {
     }
 }
 
+impl Default for ConfigurationBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// The Configuration Descriptor contains information about the device power
 /// requirements and the number of interfaces it can support. A device can have
 /// multiple configurations. The host can select the configuration that best
@@ -425,6 +431,12 @@ impl ConfigurationDescriptor {
     }
 }
 
+impl Default for ConfigurationDescriptor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Interface {
     iface_desc: InterfaceDescriptor,
@@ -452,12 +464,23 @@ impl Interface {
         let mut data = self.data.clone();
         result.append(&mut data);
 
-        return Ok(result);
+        Ok(result)
     }
 
     /// Returns the byte serialized size of the interface
     pub fn get_size(&self) -> usize {
-        return 9 + self.data.len();
+        9 + self.data.len()
+    }
+
+    /// Returns the interface class
+    pub fn get_class(&self) -> InterfaceClass {
+        self.iface_desc.b_interface_class
+    }
+}
+
+impl Default for Interface {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -540,6 +563,12 @@ impl InterfaceDescriptor {
     }
 }
 
+impl Default for InterfaceDescriptor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 /// [EndpointDescriptor] builder for constructing an endpoint descriptor
 pub struct EndpointBuilder {
     descriptor: EndpointDescriptor,
@@ -554,7 +583,7 @@ impl EndpointBuilder {
 
     /// Construct the new Endpoint configuration.
     pub fn build(&self) -> EndpointDescriptor {
-        self.descriptor.clone()
+        self.descriptor
     }
 
     /// Set the endpoint address number. Should be greater than 0.
@@ -565,7 +594,7 @@ impl EndpointBuilder {
 
     /// Set the endpoint direction
     pub fn direction(&mut self, direction: Direction) -> &mut Self {
-        self.descriptor.b_endpoint_address_direction = direction == Direction::In;
+        self.descriptor.b_endpoint_address_direction = direction;
         self
     }
 
@@ -598,6 +627,12 @@ impl EndpointBuilder {
     pub fn interval(&mut self, interval: u8) -> &mut Self {
         self.descriptor.b_interval = interval;
         self
+    }
+}
+
+impl Default for EndpointBuilder {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -646,8 +681,8 @@ pub struct EndpointDescriptor {
     /// * Bit 7: Direction, ignored for control endpoints.
     ///   * 0 = OUT endpoint
     ///   * 1 = IN endpoint
-    #[packed_field(bits = "16")]
-    pub b_endpoint_address_direction: bool, // True == IN, False == OUT
+    #[packed_field(bits = "16", ty = "enum")]
+    pub b_endpoint_address_direction: Direction,
     #[packed_field(bits = "17..=19", endian = "lsb")]
     pub b_endpoint_address_reserved: Integer<u8, packed_bits::Bits<3>>,
     #[packed_field(bits = "20..=23", endian = "lsb")]
@@ -713,7 +748,7 @@ impl EndpointDescriptor {
             b_descriptor_type: DescriptorType::Endpoint,
             b_endpoint_address_num: Integer::from_primitive(1),
             b_endpoint_address_reserved: Integer::from_primitive(0),
-            b_endpoint_address_direction: false,
+            b_endpoint_address_direction: Direction::Out,
             bm_attributes_xfer_type: TransferType::Control,
             bm_attributes_sync_type: SynchronizationType::NoSynchronization,
             bm_attributes_usage_type: UsageType::Data,
@@ -721,6 +756,12 @@ impl EndpointDescriptor {
             w_max_packet_size: Integer::from_primitive(0),
             b_interval: 1,
         }
+    }
+}
+
+impl Default for EndpointDescriptor {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -753,9 +794,11 @@ impl StringDescriptor {
 
         Ok(desc)
     }
+}
 
-    pub fn to_string(&self) -> String {
-        self.str.clone().unwrap_or_default()
+impl Display for StringDescriptor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.str.clone().unwrap_or_default())
     }
 }
 

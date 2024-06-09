@@ -9,9 +9,9 @@ use usb::LangId;
 
 use crate::{
     usb::{
-        hid::{HidInterfaceBuilder, HidSubclass, InterfaceProtocol},
-        ConfigurationBuilder, DeviceClass, Direction, EndpointBuilder, SynchronizationType,
-        TransferType, UsageType,
+        hid::{HidInterfaceBuilder, HidRequest, HidRequestType, HidSubclass, InterfaceProtocol},
+        ConfigurationBuilder, DeviceClass, Direction, EndpointBuilder, StandardRequest,
+        SynchronizationType, TransferType, Type, UsageType,
     },
     vhci_hcd::load_vhci_hcd,
     virtual_usb::VirtualUSBDeviceBuilder,
@@ -191,6 +191,7 @@ fn main() {
     }
 
     loop {
+        // Read from the device
         let xfer = match virtual_device.read() {
             Ok(xfer) => xfer,
             Err(e) => {
@@ -198,8 +199,31 @@ fn main() {
                 break;
             }
         };
+
+        // Handle any non-standard transfers
         if let Some(xfer) = xfer {
             log::warn!("Got unhandled xfer: {:?}", xfer);
+            if let Some(setup) = xfer.setup {
+                // Only handle Class requests
+                if setup.bm_request_type_kind != Type::Class {
+                    log::debug!("Unknown request type");
+                    continue;
+                }
+
+                // Find the endpoint
+                let endpoint = xfer.ep;
+                let request = HidRequest::from(setup);
+                log::debug!("Request for endpoint: {endpoint}");
+
+                match request {
+                    HidRequest::Unknown => {
+                        log::warn!("Unknown HID request!");
+                    }
+                    HidRequest::SetIdle(req) => {
+                        log::warn!("SetIdle: {req}");
+                    }
+                }
+            }
         }
         thread::sleep(Duration::from_millis(10));
     }
