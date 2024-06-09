@@ -127,7 +127,7 @@ fn main() {
                         .country_code(0)
                         .protocol(InterfaceProtocol::Mouse)
                         .subclass(HidSubclass::None)
-                        .report_descriptor(65)
+                        .report_descriptor(&MOUSE_DESCRIPTOR)
                         .endpoint_descriptor(
                             EndpointBuilder::new()
                                 .address_num(1)
@@ -140,44 +140,44 @@ fn main() {
                         )
                         .build(),
                 )
-                // Keyboard
-                .interface(
-                    HidInterfaceBuilder::new()
-                        .country_code(33)
-                        .protocol(InterfaceProtocol::Keyboard)
-                        .subclass(HidSubclass::Boot)
-                        .report_descriptor(39)
-                        .endpoint_descriptor(
-                            EndpointBuilder::new()
-                                .address_num(2)
-                                .direction(Direction::In)
-                                .transfer_type(TransferType::Interrupt)
-                                .sync_type(SynchronizationType::NoSynchronization)
-                                .usage_type(UsageType::Data)
-                                .max_packet_size(0x0008)
-                                .build(),
-                        )
-                        .build(),
-                )
-                // Controller
-                .interface(
-                    HidInterfaceBuilder::new()
-                        .country_code(33)
-                        .protocol(InterfaceProtocol::None)
-                        .subclass(HidSubclass::None)
-                        .report_descriptor(38)
-                        .endpoint_descriptor(
-                            EndpointBuilder::new()
-                                .address_num(3)
-                                .direction(Direction::In)
-                                .transfer_type(TransferType::Interrupt)
-                                .sync_type(SynchronizationType::NoSynchronization)
-                                .usage_type(UsageType::Data)
-                                .max_packet_size(0x0040)
-                                .build(),
-                        )
-                        .build(),
-                )
+                //// Keyboard
+                //.interface(
+                //    HidInterfaceBuilder::new()
+                //        .country_code(33)
+                //        .protocol(InterfaceProtocol::Keyboard)
+                //        .subclass(HidSubclass::Boot)
+                //        .report_descriptor(&KEYBOARD_DESCRIPTOR)
+                //        .endpoint_descriptor(
+                //            EndpointBuilder::new()
+                //                .address_num(2)
+                //                .direction(Direction::In)
+                //                .transfer_type(TransferType::Interrupt)
+                //                .sync_type(SynchronizationType::NoSynchronization)
+                //                .usage_type(UsageType::Data)
+                //                .max_packet_size(0x0008)
+                //                .build(),
+                //        )
+                //        .build(),
+                //)
+                //// Controller
+                //.interface(
+                //    HidInterfaceBuilder::new()
+                //        .country_code(33)
+                //        .protocol(InterfaceProtocol::None)
+                //        .subclass(HidSubclass::None)
+                //        .report_descriptor(&CONTROLLER_DESCRIPTOR)
+                //        .endpoint_descriptor(
+                //            EndpointBuilder::new()
+                //                .address_num(3)
+                //                .direction(Direction::In)
+                //                .transfer_type(TransferType::Interrupt)
+                //                .sync_type(SynchronizationType::NoSynchronization)
+                //                .usage_type(UsageType::Data)
+                //                .max_packet_size(0x0040)
+                //                .build(),
+                //        )
+                //        .build(),
+                //)
                 // CDC
                 //.interface(HidInterfaceBuilder::new().build())
                 // CDC Data

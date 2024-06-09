@@ -7,31 +7,31 @@ pub enum CdcSubclass {
     DirectLineControlModel = 0x01,
 }
 
-/// [Interface] builder for constructing an CDC (Communication Device Class)
-/// interface descriptor.
-pub struct CdcInterfaceBuilder {
-    iface: Interface,
-}
-
-impl CdcInterfaceBuilder {
-    pub fn new() -> Self {
-        let mut iface = Interface::new();
-        iface.iface_desc.b_interface_class = InterfaceClass::Cdc;
-
-        Self { iface }
-    }
-
-    /// Construct the new Interface configuration
-    pub fn build(&self) -> Interface {
-        self.iface.clone()
-    }
-
-    /// Set the interface subclass
-    pub fn subclass(&mut self, subclass: u8) -> &mut Self {
-        self.iface.iface_desc.b_interface_subclass = subclass;
-        self
-    }
-}
+///// [Interface] builder for constructing an CDC (Communication Device Class)
+///// interface descriptor.
+//pub struct CdcInterfaceBuilder {
+//    iface: Interface,
+//}
+//
+//impl CdcInterfaceBuilder {
+//    pub fn new() -> Self {
+//        let mut iface = Interface::new();
+//        iface.iface_desc.b_interface_class = InterfaceClass::Cdc;
+//
+//        Self { iface }
+//    }
+//
+//    /// Construct the new Interface configuration
+//    pub fn build(&self) -> Interface {
+//        self.iface.clone()
+//    }
+//
+//    /// Set the interface subclass
+//    pub fn subclass(&mut self, subclass: u8) -> &mut Self {
+//        self.iface.iface_desc.b_interface_subclass = subclass;
+//        self
+//    }
+//}
 
 pub struct CDC {
     header_func_descs: Vec<HeaderFunctionalDescriptor>,

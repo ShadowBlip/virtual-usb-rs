@@ -9,6 +9,8 @@ use std::fmt::Display;
 
 use packed_struct::prelude::*;
 
+use self::hid::HidInterface;
+
 pub const ENDPOINT_MAX_COUNT_OUT: u8 = 16;
 pub const ENDPOINT_MAX_COUNT_IN: u8 = 16;
 pub const ENDPOINT_MAX_COUNT: u8 = 32;
@@ -265,7 +267,7 @@ impl Default for DeviceQualifierDescriptor {
 
 /// Configuration is a higher-level structure for building a USB payload from
 /// [ConfigurationDescriptor] and one or more [InterfaceDescriptor].
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub struct Configuration {
     pub conf_desc: ConfigurationDescriptor,
     pub interfaces: Vec<Interface>,
@@ -352,7 +354,7 @@ impl ConfigurationBuilder {
     /// Set the interface for this configuration
     pub fn interface(&mut self, mut interface: Interface) -> &mut Self {
         // Set the interface number
-        interface.iface_desc.b_interface_number = self.config.interfaces.len() as u8;
+        interface.set_interface_number(self.config.interfaces.len() as u8);
 
         // Add the interface to the config and update the number of interfaces
         self.config.interfaces.push(interface);
@@ -437,50 +439,38 @@ impl Default for ConfigurationDescriptor {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct Interface {
-    iface_desc: InterfaceDescriptor,
-    data: Vec<u8>,
+#[derive(Debug, Clone)]
+pub enum Interface {
+    Hid(HidInterface),
 }
 
 impl Interface {
-    /// Create a new interface descriptor
-    pub fn new() -> Self {
-        Self {
-            iface_desc: InterfaceDescriptor::new(),
-            data: Vec::new(),
+    /// Set the interface number
+    pub fn set_interface_number(&mut self, num: u8) {
+        match self {
+            Interface::Hid(iface) => iface.set_interface_number(num),
         }
     }
 
     /// Serialize the interface into bytes
     pub fn pack_to_vec(&self) -> Result<Vec<u8>, PackingError> {
-        // Get the size of the total interface configuration to allocate the
-        // byte array to the correct size.
-        let size = 9 + self.data.len();
-
-        let mut result: Vec<u8> = Vec::with_capacity(size);
-        let mut bytes = self.iface_desc.pack_to_vec()?;
-        result.append(&mut bytes);
-        let mut data = self.data.clone();
-        result.append(&mut data);
-
-        Ok(result)
+        match self {
+            Interface::Hid(iface) => iface.pack_to_vec(),
+        }
     }
 
-    /// Returns the byte serialized size of the interface
+    /// Get the total serialized size of the interface
     pub fn get_size(&self) -> usize {
-        9 + self.data.len()
+        match self {
+            Interface::Hid(iface) => iface.get_size(),
+        }
     }
 
     /// Returns the interface class
     pub fn get_class(&self) -> InterfaceClass {
-        self.iface_desc.b_interface_class
-    }
-}
-
-impl Default for Interface {
-    fn default() -> Self {
-        Self::new()
+        match self {
+            Interface::Hid(iface) => iface.get_class(),
+        }
     }
 }
 

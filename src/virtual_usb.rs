@@ -14,9 +14,10 @@ use socketpair::{socketpair_stream, SocketpairStream};
 
 use crate::{
     usb::{
-        hid::HidGetDescriptorRequest, Configuration, DescriptorType, DeviceClass, DeviceDescriptor,
-        DeviceQualifierDescriptor, InterfaceClass, LangId, Recipient, SetupRequest,
-        StandardRequest, StringDescriptor, Type, ENDPOINT_MAX_COUNT, SELF_POWERED,
+        hid::{HidDescriptorType, HidGetDescriptorRequest, HidRequest},
+        Configuration, DescriptorType, DeviceClass, DeviceDescriptor, DeviceQualifierDescriptor,
+        Interface, InterfaceClass, LangId, Recipient, SetupRequest, StandardRequest,
+        StringDescriptor, Type, ENDPOINT_MAX_COUNT, SELF_POWERED,
     },
     usbip::{
         Driver, USBDeviceSpeed, USBIPCommandHeader, USBIPHeaderBasic, USBIPHeaderCmdSubmit,
@@ -314,7 +315,7 @@ impl VirtualUSBDevice {
 
         //self.reply(cmd, data, status);
         todo!();
-        Ok(())
+        //Ok(())
     }
 
     /// Handle unlinking
@@ -341,62 +342,34 @@ impl VirtualUSBDevice {
             return Err("Invalid header for submit command".into());
         };
 
-        // TODO: We only support requests to the device for now
+        // Handle the request based on recipient
         let direction = header.base.direction;
         let recipient = req.bm_request_type_recipient;
-        if recipient != Recipient::Device {
-            match recipient {
-                Recipient::Interface => match direction {
-                    UsbIpDirection::In => match req.b_request {
-                        StandardRequest::GetDescriptor => {
-                            // Get the interface descriptor this request is for
-                            let Some(config) = self.current_config.as_ref() else {
-                                let err =
-                                    "No current configuration set to get interface descriptor";
-                                return Err(err.into());
-                            };
-
-                            // Get the interface descriptor from the config
-                            let idx = req.w_index.to_primitive() as usize;
-                            let Some(iface) = config.interfaces.get(idx) else {
-                                let err = format!("No interface exists in config with index {idx}");
-                                return Err(err.into());
-                            };
-
-                            // Check to see if it is an HID interface
-                            match iface.get_class() {
-                                InterfaceClass::Hid => {
-                                    log::debug!("Get descriptor for HID!");
-                                    let request = HidGetDescriptorRequest::from(req);
-                                }
-                                _ => todo!(),
-                            }
-                        }
-                        _ => todo!(),
-                    },
-                    UsbIpDirection::Out => todo!(),
-                },
-                Recipient::Device => todo!(),
-                Recipient::Endpoint => todo!(),
-                Recipient::Other => todo!(),
+        match recipient {
+            Recipient::Device => {
+                self.handle_command_submit_ep0_standard_request_for_device(cmd, req, direction)
             }
-
-            log::warn!("unhandled recipient: {:?}", recipient);
-            // TODO: Looks like it's asking for an HID report:
-            //
-            // Hex
-            // [0x81, 0x6, 0x0, 0x22, 0x0, 0x0, 0x41, 0x0]
-            //
-            //  bm_request_type_direction | bits   0:0   | 0b1                | "In"
-            //       bm_request_type_kind | bits   1:2   | 0b00               | "Standard"
-            //  bm_request_type_recipient | bits   3:7   | 0b00001            | "Interface"
-            //                  b_request | bits   8:15  | 0b00000110         | "GetDescriptor"
-            //                    w_value | bits  16:31  | 0b0000000000100010 | "8704"
-            //                    w_index | bits  32:47  | 0b0000000000000000 | "0"
-            //                   w_length | bits  48:63  | 0b0100000100000000 | "65"
-            //return Ok(());
-            return Err(format!("invalid recipient: {:?}", recipient).into());
+            Recipient::Interface => {
+                self.handle_command_submit_ep0_standard_request_for_iface(cmd, req, direction)
+            }
+            _ => {
+                let err = format!("Unhandled recipient: {:?}", recipient);
+                Err(err.into())
+            }
         }
+    }
+
+    /// Handle standard device requests to endpoint zero
+    fn handle_command_submit_ep0_standard_request_for_device(
+        &mut self,
+        cmd: &Command,
+        req: SetupRequest,
+        direction: UsbIpDirection,
+    ) -> Result<(), Box<dyn Error>> {
+        log::debug!("handle submit ep0 standard request for device");
+        let USBIPCommandHeader::CmdSubmit(header) = cmd.header else {
+            return Err("Invalid header for submit command".into());
+        };
 
         // Handle the command based on the direction
         match direction {
@@ -543,6 +516,72 @@ impl VirtualUSBDevice {
                     ),
                 }
             }
+        }
+    }
+
+    /// Handle standard device requests to endpoint zero
+    fn handle_command_submit_ep0_standard_request_for_iface(
+        &mut self,
+        cmd: &Command,
+        req: SetupRequest,
+        direction: UsbIpDirection,
+    ) -> Result<(), Box<dyn Error>> {
+        log::debug!("handle submit ep0 standard request for interface");
+
+        match direction {
+            // IN command (data from device->host)
+            UsbIpDirection::In => match req.b_request {
+                StandardRequest::GetDescriptor => {
+                    log::debug!("USB Request: GetDescriptor");
+                    // Get the interface descriptor this request is for
+                    let Some(config) = self.current_config.as_ref() else {
+                        let err = "No current configuration set to get interface descriptor";
+                        return Err(err.into());
+                    };
+
+                    // Get the interface descriptor from the config
+                    let iface_idx = req.w_index.to_primitive() as usize;
+                    let Some(iface) = config.interfaces.get(iface_idx) else {
+                        let err = format!("No interface exists in config with index {iface_idx}");
+                        return Err(err.into());
+                    };
+
+                    // Handle the request based on the interface type
+                    match iface {
+                        Interface::Hid(hid_iface) => {
+                            let hid_req = HidGetDescriptorRequest::from(req);
+                            log::debug!("GetDescriptor for HID: {hid_req}");
+                            let desc_idx = hid_req.b_descriptor_index as usize;
+
+                            // Handle the request based on type
+                            match hid_req.b_descriptor_type {
+                                HidDescriptorType::Hid => {
+                                    todo!()
+                                }
+                                HidDescriptorType::Report => {
+                                    let Some(desc) = hid_iface.report_descriptors.get(desc_idx)
+                                    else {
+                                        let err = format!(
+                                            "No report descriptor exists with index {desc_idx}"
+                                        );
+                                        return Err(err.into());
+                                    };
+
+                                    // Write the reply
+                                    self.reply(cmd, desc, 0)?;
+                                    Ok(())
+                                }
+                                HidDescriptorType::Physical => {
+                                    todo!()
+                                }
+                            }
+                        }
+                    }
+                }
+                _ => todo!(),
+            },
+            // OUT command (data from host->device)
+            UsbIpDirection::Out => todo!(),
         }
     }
 
