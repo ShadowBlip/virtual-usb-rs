@@ -140,44 +140,44 @@ fn main() {
                         )
                         .build(),
                 )
-                //// Keyboard
-                //.interface(
-                //    HidInterfaceBuilder::new()
-                //        .country_code(33)
-                //        .protocol(InterfaceProtocol::Keyboard)
-                //        .subclass(HidSubclass::Boot)
-                //        .report_descriptor(&KEYBOARD_DESCRIPTOR)
-                //        .endpoint_descriptor(
-                //            EndpointBuilder::new()
-                //                .address_num(2)
-                //                .direction(Direction::In)
-                //                .transfer_type(TransferType::Interrupt)
-                //                .sync_type(SynchronizationType::NoSynchronization)
-                //                .usage_type(UsageType::Data)
-                //                .max_packet_size(0x0008)
-                //                .build(),
-                //        )
-                //        .build(),
-                //)
-                //// Controller
-                //.interface(
-                //    HidInterfaceBuilder::new()
-                //        .country_code(33)
-                //        .protocol(InterfaceProtocol::None)
-                //        .subclass(HidSubclass::None)
-                //        .report_descriptor(&CONTROLLER_DESCRIPTOR)
-                //        .endpoint_descriptor(
-                //            EndpointBuilder::new()
-                //                .address_num(3)
-                //                .direction(Direction::In)
-                //                .transfer_type(TransferType::Interrupt)
-                //                .sync_type(SynchronizationType::NoSynchronization)
-                //                .usage_type(UsageType::Data)
-                //                .max_packet_size(0x0040)
-                //                .build(),
-                //        )
-                //        .build(),
-                //)
+                // Keyboard
+                .interface(
+                    HidInterfaceBuilder::new()
+                        .country_code(33)
+                        .protocol(InterfaceProtocol::Keyboard)
+                        .subclass(HidSubclass::Boot)
+                        .report_descriptor(&KEYBOARD_DESCRIPTOR)
+                        .endpoint_descriptor(
+                            EndpointBuilder::new()
+                                .address_num(2)
+                                .direction(Direction::In)
+                                .transfer_type(TransferType::Interrupt)
+                                .sync_type(SynchronizationType::NoSynchronization)
+                                .usage_type(UsageType::Data)
+                                .max_packet_size(0x0008)
+                                .build(),
+                        )
+                        .build(),
+                )
+                // Controller
+                .interface(
+                    HidInterfaceBuilder::new()
+                        .country_code(33)
+                        .protocol(InterfaceProtocol::None)
+                        .subclass(HidSubclass::None)
+                        .report_descriptor(&CONTROLLER_DESCRIPTOR)
+                        .endpoint_descriptor(
+                            EndpointBuilder::new()
+                                .address_num(3)
+                                .direction(Direction::In)
+                                .transfer_type(TransferType::Interrupt)
+                                .sync_type(SynchronizationType::NoSynchronization)
+                                .usage_type(UsageType::Data)
+                                .max_packet_size(0x0040)
+                                .build(),
+                        )
+                        .build(),
+                )
                 // CDC
                 //.interface(HidInterfaceBuilder::new().build())
                 // CDC Data
@@ -221,6 +221,14 @@ fn main() {
                     }
                     HidRequest::SetIdle(req) => {
                         log::warn!("SetIdle: {req}");
+                    }
+                    // The host wants to set the given report on the device
+                    HidRequest::SetReport(req) => {
+                        log::warn!("SetReport: {req}");
+                        let data = xfer.data;
+                        log::warn!("Got SetReport data: {data:?}");
+                        //let reply = Reply::new()
+                        //virtual_device.write(reply);
                     }
                 }
             }

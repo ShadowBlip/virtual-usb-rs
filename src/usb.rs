@@ -96,6 +96,7 @@ pub enum DescriptorType {
     DeviceQualifier = 6,
     OtherSpeedConfiguration = 7,
     InterfacePower = 8,
+    Debug = 0x0a,
 }
 
 /// Class code (assigned by the USB-IF).
@@ -181,7 +182,7 @@ impl DeviceDescriptor {
             b_max_packet_size_0: 0x10,
             id_vendor: Integer::from_primitive(vendor_id),
             id_product: Integer::from_primitive(product_id),
-            bcd_device: Integer::from_primitive(0x0100),
+            bcd_device: Integer::from_primitive(0x0300),
             i_manufacturer: 0x01, // String 1
             i_product: 0x02,      // String 2
             i_serial_number: 0x00,
@@ -794,8 +795,15 @@ impl Display for StringDescriptor {
 
 impl From<String> for StringDescriptor {
     fn from(value: String) -> Self {
+        let mut bytes = Vec::with_capacity(value.len() * 2);
+        let utf16_enc: Vec<u16> = value.encode_utf16().collect();
+        for wbyte in utf16_enc.iter() {
+            let mut byte_pair = wbyte.to_le_bytes().to_vec();
+            bytes.append(&mut byte_pair);
+        }
+
         Self {
-            data: value.as_bytes().to_vec(),
+            data: bytes,
             str: Some(value),
         }
     }
@@ -803,8 +811,15 @@ impl From<String> for StringDescriptor {
 
 impl From<&str> for StringDescriptor {
     fn from(value: &str) -> Self {
+        let mut bytes = Vec::with_capacity(value.len() * 2);
+        let utf16_enc: Vec<u16> = value.encode_utf16().collect();
+        for wbyte in utf16_enc.iter() {
+            let mut byte_pair = wbyte.to_le_bytes().to_vec();
+            bytes.append(&mut byte_pair);
+        }
+
         Self {
-            data: value.as_bytes().to_vec(),
+            data: bytes,
             str: Some(value.to_string()),
         }
     }

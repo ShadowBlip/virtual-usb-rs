@@ -102,6 +102,7 @@ impl From<StandardRequest> for HidRequestType {
 /// A Human Interface Device (HID) USB request
 pub enum HidRequest {
     Unknown,
+    SetReport(HidSetReportRequest),
     SetIdle(HidSetIdleRequest),
 }
 
@@ -113,7 +114,7 @@ impl From<SetupRequest> for HidRequest {
             HidRequestType::GetReport => todo!(),
             HidRequestType::GetIdle => todo!(),
             HidRequestType::GetProtocol => todo!(),
-            HidRequestType::SetReport => todo!(),
+            HidRequestType::SetReport => Self::SetReport(setup.into()),
             HidRequestType::SetIdle => Self::SetIdle(setup.into()),
             HidRequestType::SetProtocol => todo!(),
             _ => Self::Unknown,
@@ -121,7 +122,7 @@ impl From<SetupRequest> for HidRequest {
     }
 }
 
-/// GetReport request
+/// SetIdle request
 #[derive(PackedStruct, Debug, Copy, Clone, PartialEq)]
 #[packed_struct(bit_numbering = "msb0", size_bytes = "8")]
 pub struct HidSetIdleRequest {
@@ -152,6 +153,48 @@ impl From<SetupRequest> for HidSetIdleRequest {
     fn from(value: SetupRequest) -> Self {
         let data = value.pack().unwrap();
         HidSetIdleRequest::unpack(&data).unwrap()
+    }
+}
+
+/// HID report type
+#[derive(PrimitiveEnum_u8, Debug, Copy, Clone, PartialEq)]
+pub enum HidReportType {
+    Input = 0x01,
+    Output = 0x02,
+    Feature = 0x03,
+}
+
+/// SetReport request
+#[derive(PackedStruct, Debug, Copy, Clone, PartialEq)]
+#[packed_struct(bit_numbering = "msb0", size_bytes = "8")]
+pub struct HidSetReportRequest {
+    /// byte 0
+    #[packed_field(bits = "0", ty = "enum")]
+    pub bm_request_type_direction: Direction,
+    #[packed_field(bits = "1..=2", ty = "enum")]
+    pub bm_request_type_kind: Type,
+    #[packed_field(bits = "3..=7", ty = "enum")]
+    pub bm_request_type_recipient: Recipient,
+    // byte 1
+    #[packed_field(bytes = "1", ty = "enum")]
+    pub b_request: HidRequestType,
+    // byte 2-3 (wValue)
+    #[packed_field(bytes = "2")]
+    pub report_id: u8,
+    #[packed_field(bytes = "3", ty = "enum")]
+    pub report_type: HidReportType,
+    // byte 4-5 (wIndex)
+    #[packed_field(bytes = "4..=5", endian = "lsb")]
+    pub interface: Integer<u16, packed_bits::Bits<16>>,
+    // byte 6-7 (wLength)
+    #[packed_field(bytes = "6..=7", endian = "lsb")]
+    pub report_length: Integer<u16, packed_bits::Bits<16>>,
+}
+
+impl From<SetupRequest> for HidSetReportRequest {
+    fn from(value: SetupRequest) -> Self {
+        let data = value.pack().unwrap();
+        HidSetReportRequest::unpack(&data).unwrap()
     }
 }
 

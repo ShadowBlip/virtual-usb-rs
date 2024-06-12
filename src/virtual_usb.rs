@@ -16,7 +16,7 @@ use crate::{
     usb::{
         hid::{HidDescriptorType, HidGetDescriptorRequest, HidRequest},
         Configuration, DescriptorType, DeviceClass, DeviceDescriptor, DeviceQualifierDescriptor,
-        Interface, InterfaceClass, LangId, Recipient, SetupRequest, StandardRequest,
+        Direction, Interface, InterfaceClass, LangId, Recipient, SetupRequest, StandardRequest,
         StringDescriptor, Type, ENDPOINT_MAX_COUNT, SELF_POWERED,
     },
     usbip::{
@@ -51,7 +51,7 @@ pub struct Reply {
 }
 
 /// USB Transfer
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Xfer {
     /// Endpoint
     pub ep: u8,
@@ -62,6 +62,7 @@ pub struct Xfer {
 }
 
 /// Virtual USB Device
+#[derive(Debug)]
 pub struct VirtualUSBDevice {
     /// Information about the virtual USB device
     pub info: Info,
@@ -285,7 +286,7 @@ impl VirtualUSBDevice {
         let xfer = Xfer {
             // TODO: Double check this
             ep: ep_idx as u8,
-            setup: None,
+            setup: Some(header.setup),
             // TODO: Can we move?
             data: cmd.payload.clone(),
         };
@@ -314,8 +315,8 @@ impl VirtualUSBDevice {
         log::error!("Not implemented!");
 
         //self.reply(cmd, data, status);
-        todo!();
-        //Ok(())
+        //todo!();
+        Ok(())
     }
 
     /// Handle unlinking
@@ -438,6 +439,10 @@ impl VirtualUSBDevice {
                         DescriptorType::DeviceQualifier => {
                             log::debug!("USB request GetDescriptor DeviceQualifier");
                             self.info.device_qualifier_desc.pack_to_vec()?
+                        }
+                        DescriptorType::Debug => {
+                            log::debug!("USB request GetDescriptor Debug");
+                            vec![]
                         }
                         _ => {
                             // Unsupported descriptor type
@@ -798,6 +803,7 @@ impl ReadHandler {
         }
 
         let header = USBIPHeaderInit::unpack(&buf)?;
+        log::debug!("Got header: {header:?}");
 
         // Unpack the appropriate header based on the command
         let header = match header.base.command.to_primitive() {
@@ -842,8 +848,10 @@ impl ReadHandler {
         };
 
         // Read the payload if one exists
-        if cmd.payload.capacity() > 0 {
-            log::debug!("Reading payload");
+        let payload_size = cmd.payload.capacity();
+        if payload_size > 0 {
+            log::debug!("Reading payload with size: {}", payload_size);
+            cmd.payload.resize(payload_size, 0);
             let payload_buf = cmd.payload.as_mut_slice();
             self.socket.read_exact(payload_buf)?;
         }
