@@ -1,7 +1,6 @@
 //! Reference:
 //! https://github.com/toasterllc/Toastbox/blob/d3b1770c6816eb648ee2e0a754c2dd9c3bd5342f/USB.h
 
-//#![allow(warnings)]
 pub mod cdc;
 pub mod hid;
 
@@ -83,6 +82,58 @@ pub struct SetupRequest {
     // byte 6-7
     #[packed_field(bytes = "6..=7", endian = "lsb")]
     pub w_length: Integer<u16, packed_bits::Bits<16>>,
+}
+
+impl SetupRequest {
+    /// Returns true if all fields are set to zero. Typically means that this
+    /// is an unused/dummy request for IN transfers.
+    pub fn is_empty(&self) -> bool {
+        self.bm_request_type_direction == Direction::Out
+            && self.bm_request_type_kind == Type::Standard
+            && self.bm_request_type_recipient == Recipient::Device
+            && self.b_request == StandardRequest::GetStatus
+            && self.w_value.to_primitive() == 0
+            && self.w_index.to_primitive() == 0
+            && self.w_length.to_primitive() == 0
+    }
+
+    /// Return the direction of the request. OUT requests (host -> device) are
+    /// requests where the host is sending data to the device. IN requests
+    /// (device -> host) are requests that ask for the device to send data
+    /// to the host.
+    pub fn direction(&self) -> Direction {
+        self.bm_request_type_direction
+    }
+
+    /// The type of the request
+    pub fn request_type(&self) -> Type {
+        self.bm_request_type_kind
+    }
+
+    /// Returns true if this is a standard USB request.
+    pub fn is_standard(&self) -> bool {
+        self.bm_request_type_kind == Type::Standard
+    }
+
+    /// Returns the recipient that this request is meant for.
+    pub fn recipient(&self) -> Recipient {
+        self.bm_request_type_recipient
+    }
+
+    /// The value of the request.
+    pub fn value(&self) -> u16 {
+        self.w_value.to_primitive()
+    }
+
+    /// The index of the request.
+    pub fn index(&self) -> u16 {
+        self.w_index.to_primitive()
+    }
+
+    /// The length of the request
+    pub fn length(&self) -> u16 {
+        self.w_length.to_primitive()
+    }
 }
 
 /// Descriptor type (bDescriptorType, wValue [high bytes])
@@ -347,6 +398,7 @@ impl ConfigurationBuilder {
     /// Maximum power consumption of the USB device from the bus in this specific
     /// configuration when the device is fully operational. Expressed in 2mA
     /// units (i.e., 50 = 100mA).
+    #[allow(non_snake_case)]
     pub fn max_power(&mut self, max_power_mA: u16) -> &mut Self {
         self.config.conf_desc.b_max_power = (max_power_mA / 2) as u8;
         self

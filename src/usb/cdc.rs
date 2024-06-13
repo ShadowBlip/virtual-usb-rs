@@ -1,7 +1,5 @@
 use packed_struct::prelude::*;
 
-use super::{EndpointDescriptor, Interface, InterfaceClass};
-
 pub enum CdcSubclass {
     None = 0x00,
     DirectLineControlModel = 0x01,
@@ -33,13 +31,13 @@ pub enum CdcSubclass {
 //    }
 //}
 
-pub struct CDC {
-    header_func_descs: Vec<HeaderFunctionalDescriptor>,
-    call_management_func_descs: Vec<CallManagementFunctionalDescriptor>,
-    acm_func_descs: Vec<AbstractControlManagementFunctionalDescriptor>,
-    union_func_descs: Vec<UnionFunctionalDescriptor>,
-    endpoint_descs: Vec<EndpointDescriptor>,
-}
+//pub struct CDC {
+//    header_func_descs: Vec<HeaderFunctionalDescriptor>,
+//    call_management_func_descs: Vec<CallManagementFunctionalDescriptor>,
+//    acm_func_descs: Vec<AbstractControlManagementFunctionalDescriptor>,
+//    union_func_descs: Vec<UnionFunctionalDescriptor>,
+//    endpoint_descs: Vec<EndpointDescriptor>,
+//}
 
 #[derive(PackedStruct, Debug, Copy, Clone, PartialEq)]
 #[packed_struct(bit_numbering = "msb0", size_bytes = "5")]

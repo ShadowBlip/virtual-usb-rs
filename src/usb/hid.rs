@@ -102,7 +102,8 @@ impl From<StandardRequest> for HidRequestType {
 /// A Human Interface Device (HID) USB request
 pub enum HidRequest {
     Unknown,
-    SetReport(HidSetReportRequest),
+    GetReport(HidReportRequest),
+    SetReport(HidReportRequest),
     SetIdle(HidSetIdleRequest),
 }
 
@@ -111,7 +112,7 @@ impl From<SetupRequest> for HidRequest {
     fn from(setup: SetupRequest) -> Self {
         let request_type = HidRequestType::from(setup.b_request);
         match request_type {
-            HidRequestType::GetReport => todo!(),
+            HidRequestType::GetReport => Self::GetReport(setup.into()),
             HidRequestType::GetIdle => todo!(),
             HidRequestType::GetProtocol => todo!(),
             HidRequestType::SetReport => Self::SetReport(setup.into()),
@@ -167,7 +168,7 @@ pub enum HidReportType {
 /// SetReport request
 #[derive(PackedStruct, Debug, Copy, Clone, PartialEq)]
 #[packed_struct(bit_numbering = "msb0", size_bytes = "8")]
-pub struct HidSetReportRequest {
+pub struct HidReportRequest {
     /// byte 0
     #[packed_field(bits = "0", ty = "enum")]
     pub bm_request_type_direction: Direction,
@@ -191,10 +192,10 @@ pub struct HidSetReportRequest {
     pub report_length: Integer<u16, packed_bits::Bits<16>>,
 }
 
-impl From<SetupRequest> for HidSetReportRequest {
+impl From<SetupRequest> for HidReportRequest {
     fn from(value: SetupRequest) -> Self {
         let data = value.pack().unwrap();
-        HidSetReportRequest::unpack(&data).unwrap()
+        HidReportRequest::unpack(&data).unwrap()
     }
 }
 

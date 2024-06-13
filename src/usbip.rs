@@ -51,6 +51,16 @@ pub enum USBIPCommandHeader {
     CmdUnlink(USBIPHeaderCmdUnlink),
 }
 
+impl USBIPCommandHeader {
+    /// Returns the USBIP header from the command header
+    pub fn get_header(&self) -> USBIPHeaderBasic {
+        match self {
+            USBIPCommandHeader::CmdSubmit(cmd) => cmd.base,
+            USBIPCommandHeader::CmdUnlink(cmd) => cmd.base,
+        }
+    }
+}
+
 /// Possible USBIP reply headers
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum USBIPReplyHeader {
@@ -68,18 +78,30 @@ pub struct USBIPHeaderInit {
 #[derive(PackedStruct, Debug, Copy, Clone, PartialEq)]
 #[packed_struct(bit_numbering = "msb0", size_bytes = "48")]
 pub struct USBIPHeaderCmdSubmit {
+    /// usbip_header_basic, ‘command’ shall be 0x00000001
     #[packed_field(bytes = "0..=19")]
     pub base: USBIPHeaderBasic,
+    /// transfer_flags: possible values depend on the USBIP_URB transfer_flags.
+    /// Refer to include/uapi/linux/usbip.h and USB Request Block (URB). Refer
+    /// to usbip_pack_cmd_submit() and tweak_transfer_flags() in
+    /// drivers/usb/usbip/ usbip_common.c.
     #[packed_field(bytes = "20..=23", endian = "msb")]
     pub transfer_flags: Integer<u32, packed_bits::Bits<32>>,
+    /// transfer_buffer_length: use URB transfer_buffer_length
     #[packed_field(bytes = "24..=27", endian = "msb")]
     pub transfer_buffer_length: Integer<i32, packed_bits::Bits<32>>,
+    /// start_frame: use URB start_frame; initial frame for ISO transfer; shall
+    /// be set to 0 if not ISO transfer
     #[packed_field(bytes = "28..=31", endian = "msb")]
     pub start_frame: Integer<i32, packed_bits::Bits<32>>,
+    /// number_of_packets: number of ISO packets; shall be set to 0xffffffff if
+    /// not ISO transfer
     #[packed_field(bytes = "32..=35", endian = "msb")]
     pub number_of_packets: Integer<i32, packed_bits::Bits<32>>,
+    /// interval: maximum time for the request on the server-side host controller
     #[packed_field(bytes = "36..=39", endian = "msb")]
     pub interval: Integer<i32, packed_bits::Bits<32>>,
+    /// setup: data bytes for USB setup, filled with zeros if not used.
     #[packed_field(bytes = "40..=47", endian = "msb")]
     pub setup: SetupRequest,
 }
@@ -87,16 +109,25 @@ pub struct USBIPHeaderCmdSubmit {
 #[derive(PackedStruct, Debug, Copy, Clone, PartialEq)]
 #[packed_struct(bit_numbering = "msb0", size_bytes = "48")]
 pub struct USBIPHeaderRetSubmit {
+    /// usbip_header_basic, ‘command’ shall be 0x00000003
     #[packed_field(bytes = "0..=19")]
     pub base: USBIPHeaderBasic,
+    /// status: zero for successful URB transaction, otherwise some kind of
+    /// error happened.
     #[packed_field(bytes = "20..=23", endian = "msb")]
     pub status: Integer<i32, packed_bits::Bits<32>>,
+    /// actual_length: number of URB data bytes; use URB actual_length
     #[packed_field(bytes = "24..=27", endian = "msb")]
     pub actual_length: Integer<i32, packed_bits::Bits<32>>,
+    /// start_frame: use URB start_frame; initial frame for ISO transfer; shall
+    /// be set to 0 if not ISO transfer
     #[packed_field(bytes = "28..=31", endian = "msb")]
     pub start_frame: Integer<i32, packed_bits::Bits<32>>,
+    /// number_of_packets: number of ISO packets; shall be set to 0xffffffff if
+    /// not ISO transfer
     #[packed_field(bytes = "32..=35", endian = "msb")]
     pub number_of_packets: Integer<i32, packed_bits::Bits<32>>,
+    /// error_count
     #[packed_field(bytes = "36..=39", endian = "msb")]
     pub error_count: Integer<i32, packed_bits::Bits<32>>,
 }
@@ -123,14 +154,23 @@ pub struct USBIPHeaderRetUnlink {
 #[derive(PackedStruct, Debug, Copy, Clone, PartialEq)]
 #[packed_struct(bit_numbering = "msb0", size_bytes = "20")]
 pub struct USBIPHeaderBasic {
+    /// command
     #[packed_field(bytes = "0..=3", endian = "msb")]
     pub command: Integer<u32, packed_bits::Bits<32>>,
+    /// seqnum: sequential number that identifies requests and corresponding
+    /// responses; incremented per connection
     #[packed_field(bytes = "4..=7", endian = "msb")]
     pub seqnum: Integer<u32, packed_bits::Bits<32>>,
+    /// devid: specifies a remote USB device uniquely instead of busnum and
+    /// devnum; for client (request), this value is ((busnum << 16) | devnum);
+    /// for server (response), this shall be set to 0
     #[packed_field(bytes = "8..=11", endian = "msb")]
     pub devid: Integer<u32, packed_bits::Bits<32>>,
+    /// only used by client, for server this shall be 0
     #[packed_field(bytes = "12..=15", endian = "msb", ty = "enum")]
     pub direction: UsbIpDirection,
+    /// ep: endpoint number only used by client, for server this shall be 0; for
+    /// UNLINK, this shall be 0
     #[packed_field(bytes = "16..=19", endian = "msb")]
     pub ep: Integer<u32, packed_bits::Bits<32>>,
 }
@@ -171,15 +211,75 @@ pub struct USBDevice {
     pub b_num_interfaces: u8,
 }
 
-/// Device imported from USBIP
-pub struct ImportedDevice {
-    hub: HubSpeed,
-    port: u8,
-    status: u32,
-    devid: u32,
-    busnum: u8,
-    devnum: u8,
-    udev: USBDevice,
+/// Representation of a virtual USB port from the vhci-hcd "status" property
+#[derive(Debug, Clone, Default)]
+pub struct VirtualUsbPort {
+    pub hub: String,
+    pub port: u8,
+    pub status: u8,
+    pub speed: u8,
+    pub device: u32,
+    pub sock_fd: u32,
+    pub local_bus_id: String,
+}
+
+impl TryFrom<&str> for VirtualUsbPort {
+    type Error = &'static str;
+
+    /// Try to build a [VirtualUsbPort] from the given line of the "status"
+    /// property of the vhci-hcd device.
+    ///
+    /// E.g.
+    ///   hub port sta spd dev      sockfd local_busid
+    ///   hs  0000 004 000 00000000 000000 0-0
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        let mut port = VirtualUsbPort::default();
+        let mut parts = value.split_whitespace();
+
+        // hub
+        let Some(hub) = parts.next().map(|part| part.to_string()) else {
+            return Err("Unable to parse hub value");
+        };
+        port.hub = hub;
+
+        // port
+        let Some(port_num) = parts.next().and_then(|num| num.parse::<u8>().ok()) else {
+            return Err("Unable to parse port number");
+        };
+        port.port = port_num;
+
+        // status
+        let Some(status) = parts.next().and_then(|value| value.parse::<u8>().ok()) else {
+            return Err("Unable to parse port status");
+        };
+        port.status = status;
+
+        // speed
+        let Some(speed) = parts.next().and_then(|spd| spd.parse::<u8>().ok()) else {
+            return Err("Unable to parse port speed");
+        };
+        port.speed = speed;
+
+        // dev
+        let Some(dev) = parts.next().and_then(|dev| dev.parse::<u32>().ok()) else {
+            return Err("Unable to parse port device");
+        };
+        port.device = dev;
+
+        // sockfd
+        let Some(fd) = parts.next().and_then(|fd| fd.parse::<u32>().ok()) else {
+            return Err("Unable to parse port socket file descriptor");
+        };
+        port.sock_fd = fd;
+
+        // local_busid
+        let Some(id) = parts.next().map(|id| id.to_string()) else {
+            return Err("Unable to parse local bus id");
+        };
+        port.local_bus_id = id;
+
+        Ok(port)
+    }
 }
 
 /// Driver for interfacing with the sysfs API for vhci-hcd.
@@ -187,7 +287,7 @@ pub struct ImportedDevice {
 pub struct Driver {
     /* /sys/devices/platform/vhci_hcd */
     hc_device: Option<Device>,
-    n_controllers: i32,
+    _n_controllers: i32,
     n_ports: i32,
 }
 
@@ -240,6 +340,62 @@ impl Driver {
         log::debug!("attached port: {port}");
 
         Ok(())
+    }
+
+    /// Returns a list of all USB ports from the virtual USB hub
+    pub fn get_ports(&self) -> Result<Vec<VirtualUsbPort>, Box<dyn Error>> {
+        let Some(ref device) = self.hc_device else {
+            return Err("Device driver has not been opened".into());
+        };
+
+        // Read the "status" property and convert it to a string to parse
+        let result = device.attribute_value("status");
+        if result.is_none() {
+            return Err("Unable to find status attribute".into());
+        }
+        let status = result.unwrap().to_string_lossy().to_string();
+        log::debug!("Status: {status:?}");
+
+        // Prepare the vector of ports based on ports available
+        let nports = self.get_nports()?;
+        let mut ports = Vec::with_capacity(nports as usize);
+
+        // Parse each line of the status output and create a VirtualUsbPort
+        // E.g.
+        //   hub port sta spd dev      sockfd local_busid
+        //   hs  0000 004 000 00000000 000000 0-0
+        //   hs  0001 004 000 00000000 000000 0-0
+        //   ..
+        for line in status.lines() {
+            if line.starts_with("hub") {
+                continue;
+            }
+
+            let port = match VirtualUsbPort::try_from(line) {
+                Ok(port) => port,
+                Err(e) => {
+                    log::warn!("Failed to parse port from status: {e:?}");
+                    continue;
+                }
+            };
+
+            log::debug!("Found port: {port:?}");
+            ports.push(port);
+        }
+
+        Ok(ports)
+    }
+
+    /// Returns the next available USB port on the virtual USB hub
+    pub fn get_next_port_number(&self) -> Result<u8, Box<dyn Error>> {
+        let ports = self.get_ports()?;
+        for port in ports {
+            if port.status == 4 {
+                return Ok(port.port);
+            }
+        }
+
+        Err("Unable to find available port".into())
     }
 
     /// Get the number of ports from the vhci device

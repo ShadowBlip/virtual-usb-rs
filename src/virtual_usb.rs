@@ -14,10 +14,10 @@ use socketpair::{socketpair_stream, SocketpairStream};
 
 use crate::{
     usb::{
-        hid::{HidDescriptorType, HidGetDescriptorRequest, HidRequest},
+        hid::{HidDescriptorType, HidGetDescriptorRequest},
         Configuration, DescriptorType, DeviceClass, DeviceDescriptor, DeviceQualifierDescriptor,
-        Direction, Interface, InterfaceClass, LangId, Recipient, SetupRequest, StandardRequest,
-        StringDescriptor, Type, ENDPOINT_MAX_COUNT, SELF_POWERED,
+        Interface, LangId, Recipient, SetupRequest, StandardRequest, StringDescriptor,
+        ENDPOINT_MAX_COUNT, SELF_POWERED,
     },
     usbip::{
         Driver, USBDeviceSpeed, USBIPCommandHeader, USBIPHeaderBasic, USBIPHeaderCmdSubmit,
@@ -43,6 +43,12 @@ pub struct Command {
     payload: Vec<u8>,
 }
 
+impl Command {
+    pub fn get_header(&self) -> USBIPHeaderBasic {
+        self.header.get_header()
+    }
+}
+
 /// Replies sent over usbip unix socket
 #[derive(Debug)]
 pub struct Reply {
@@ -50,15 +56,66 @@ pub struct Reply {
     payload: Vec<u8>,
 }
 
+impl Reply {
+    /// Create a new reply from the given transfer and data payload
+    pub fn from_xfer(xfer: Xfer, data: &[u8]) -> Result<Self, Box<dyn Error>> {
+        let cmd = xfer.cmd;
+        let header = cmd.base;
+
+        // Set the payload if this is an IN command (device -> host)
+        let mut payload = Vec::with_capacity(data.len());
+        if header.direction == UsbIpDirection::In {
+            payload = data.to_vec();
+        }
+
+        Ok(Self {
+            header: USBIPReplyHeader::RetSubmit(USBIPHeaderRetSubmit {
+                base: USBIPHeaderBasic {
+                    command: Integer::from_primitive(USBIP_RET_SUBMIT),
+                    seqnum: header.seqnum,
+                    devid: header.devid,
+                    direction: header.direction,
+                    ep: header.ep,
+                },
+                status: Integer::from_primitive(0),
+                actual_length: Integer::from_primitive(data.len() as i32),
+                start_frame: Integer::from_primitive(0),
+                number_of_packets: Integer::from_primitive(0),
+                error_count: Integer::from_primitive(0),
+            }),
+            payload,
+        })
+    }
+}
+
 /// USB Transfer
 #[derive(Debug, Clone)]
 pub struct Xfer {
     /// Endpoint
     pub ep: u8,
-    /// Setup
-    pub setup: Option<SetupRequest>,
     /// USB Transfer data
     pub data: Vec<u8>,
+    /// Setup
+    cmd: USBIPHeaderCmdSubmit,
+}
+
+impl Xfer {
+    /// Returns the USB setup request for this transfer. If this in an IN
+    /// request, the setup request will be empty.
+    pub fn header(&self) -> Option<SetupRequest> {
+        if self.cmd.setup.is_empty() {
+            return None;
+        }
+        Some(self.cmd.setup)
+    }
+
+    /// Returns the direction of the transfer. OUT requests (host -> device)
+    /// mean that the host is writing data to the device, and IN requests
+    /// (device -> host) means the device has an opportunity to send data to the
+    /// host.
+    pub fn direction(&self) -> UsbIpDirection {
+        self.cmd.base.direction
+    }
 }
 
 /// Virtual USB Device
@@ -102,8 +159,8 @@ impl VirtualUSBDevice {
         let mut driver = Driver::new();
         driver.open()?;
 
-        // TODO: Implement find free port
-        let port = 0;
+        // Find the next available port on the virtual USB hub
+        let port = driver.get_next_port_number()?;
         self.port = Some(port);
 
         // Attach the device to the port
@@ -232,7 +289,7 @@ impl VirtualUSBDevice {
         let USBIPCommandHeader::CmdSubmit(header) = cmd.header else {
             return Err("Invalid header for submit command".into());
         };
-        let standard_type = header.setup.bm_request_type_kind == Type::Standard;
+        let standard_type = header.setup.is_standard();
 
         // Handle standard requests automatically
         if standard_type {
@@ -243,7 +300,7 @@ impl VirtualUSBDevice {
         // Otherwise, handle as a regular endpoint command
         if let Some(mut xfer) = self.handle_command_submit_epX(cmd)? {
             // Populate the setupReq member, since it's always expected for ep==0
-            xfer.setup = Some(header.setup);
+            xfer.cmd = header;
             return Ok(Some(xfer));
         }
 
@@ -261,10 +318,7 @@ impl VirtualUSBDevice {
             // OUT command (data from host->device)
             UsbIpDirection::Out => self.handle_command_submit_epX_out(cmd),
             // IN command (data from device->host)
-            UsbIpDirection::In => {
-                self.handle_command_submit_epX_in(cmd)?;
-                Ok(None)
-            }
+            UsbIpDirection::In => self.handle_command_submit_epX_in(cmd),
         }
     }
 
@@ -286,9 +340,9 @@ impl VirtualUSBDevice {
         let xfer = Xfer {
             // TODO: Double check this
             ep: ep_idx as u8,
-            setup: Some(header.setup),
             // TODO: Can we move?
             data: cmd.payload.clone(),
+            cmd: header,
         };
 
         Ok(Some(xfer))
@@ -296,7 +350,7 @@ impl VirtualUSBDevice {
 
     /// Handle command submit IN to any other USB endpoint.
     #[allow(non_snake_case)]
-    fn handle_command_submit_epX_in(&self, cmd: &Command) -> Result<(), Box<dyn Error>> {
+    fn handle_command_submit_epX_in(&self, cmd: &Command) -> Result<Option<Xfer>, Box<dyn Error>> {
         log::debug!("handle submit epX IN");
         let USBIPCommandHeader::CmdSubmit(header) = cmd.header else {
             return Err("Invalid header for submit command".into());
@@ -306,18 +360,36 @@ impl VirtualUSBDevice {
         if ep_idx >= ENDPOINT_MAX_COUNT as u32 {
             return Err("Invalid endpoint index".into());
         }
-        self.send_data_for_in_endpoint(cmd)
+
+        // This is an IN transfer that must be handled by user code
+        let xfer = Xfer {
+            ep: ep_idx as u8,
+            data: cmd.payload.clone(),
+            cmd: header,
+        };
+
+        Ok(Some(xfer))
     }
 
     /// Send data to the host for an IN endpoint
-    fn send_data_for_in_endpoint(&self, cmd: &Command) -> Result<(), Box<dyn Error>> {
-        // TODO: Implement this
-        log::error!("Not implemented!");
+    //fn send_data_for_in_endpoint(&self, _cmd: &Command) -> Result<(), Box<dyn Error>> {
+    //    // TODO: Implement this
+    //    log::error!("Not implemented!");
 
-        //self.reply(cmd, data, status);
-        //todo!();
-        Ok(())
-    }
+    //    // TODO: Figure this Out
+    //    // This is a GET_REPORT request for HID
+    //    // bm_request_type_direction | bits   0:0   | 0b1                | "In"
+    //    //      bm_request_type_kind | bits   1:2   | 0b01               | "Class"
+    //    // bm_request_type_recipient | bits   3:7   | 0b00001            | "Interface"
+    //    //                 b_request | bits   8:15  | 0b00000001         | "ClearFeature"
+    //    //                   w_value | bits  16:31  | 0b0000000000000011 | "768" (Report ID: 0, ReportType: Feature (3))
+    //    //                   w_index | bits  32:47  | 0b0000001000000000 | "2"
+    //    //                  w_length | bits  48:63  | 0b0100000000000000 | "64"
+
+    //    //self.reply(cmd, data, status);
+    //    //todo!();
+    //    Ok(())
+    //}
 
     /// Handle unlinking
     fn handle_command_unlink(&self, cmd: &Command) -> Result<(), Box<dyn Error>> {
@@ -821,7 +893,9 @@ impl ReadHandler {
         match header {
             USBIPCommandHeader::CmdSubmit(header) => {
                 log::debug!("{header}");
-                log::debug!("{}", header.setup);
+                if !header.setup.is_empty() {
+                    log::debug!("{}", header.setup);
+                }
             }
             USBIPCommandHeader::CmdUnlink(header) => {
                 log::debug!("{header}");

@@ -9,6 +9,5 @@ edition = "2021"
 libudev = "0.3.0"
 log = "0.4.20"
 packed_struct = "0.10.1"
-simple_logger = "4.3.3"
+simple_logger = "5.0.0"
 socketpair = "0.19.4"
-#packed_struct = { path = "../packed_struct.rs/packed_struct" }
