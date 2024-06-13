@@ -58,7 +58,7 @@ pub struct Reply {
 
 impl Reply {
     /// Create a new reply from the given transfer and data payload
-    pub fn from_xfer(xfer: Xfer, data: &[u8]) -> Result<Self, Box<dyn Error>> {
+    pub fn from_xfer(xfer: Xfer, data: &[u8]) -> Self {
         let cmd = xfer.cmd;
         let header = cmd.base;
 
@@ -68,7 +68,7 @@ impl Reply {
             payload = data.to_vec();
         }
 
-        Ok(Self {
+        Self {
             header: USBIPReplyHeader::RetSubmit(USBIPHeaderRetSubmit {
                 base: USBIPHeaderBasic {
                     command: Integer::from_primitive(USBIP_RET_SUBMIT),
@@ -84,7 +84,7 @@ impl Reply {
                 error_count: Integer::from_primitive(0),
             }),
             payload,
-        })
+        }
     }
 }
 

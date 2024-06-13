@@ -199,6 +199,21 @@ impl From<SetupRequest> for HidReportRequest {
     }
 }
 
+impl HidReportRequest {
+    pub fn new(report: &[u8]) -> Self {
+        Self {
+            bm_request_type_direction: Direction::In,
+            bm_request_type_kind: Type::Class,
+            bm_request_type_recipient: Recipient::Interface,
+            b_request: HidRequestType::GetReport,
+            report_id: 0,
+            report_type: HidReportType::Input,
+            interface: Integer::from_primitive(2), // TODO: don't hardcode this
+            report_length: Integer::from_primitive(report.len() as u16),
+        }
+    }
+}
+
 /// Subclass codes for HID descriptors
 pub enum HidSubclass {
     None = 0x00,

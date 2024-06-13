@@ -6,7 +6,7 @@ use std::{thread, time::Duration};
 use packed_struct::{PackedStruct, PackedStructSlice};
 use virtual_usb::{
     usb::{
-        hid::{HidInterfaceBuilder, HidRequest, HidSubclass, InterfaceProtocol},
+        hid::{HidInterfaceBuilder, HidReportRequest, HidRequest, HidSubclass, InterfaceProtocol},
         ConfigurationBuilder, DeviceClass, Direction, EndpointBuilder, LangId, SynchronizationType,
         TransferType, Type, UsageType,
     },
@@ -110,7 +110,8 @@ fn main() {
         return;
     }
 
-    let mut state = PackedInputDataReport::default();
+    let should_send_reports = true;
+    let state = PackedInputDataReport::default();
     loop {
         // Read from the device
         let xfer = match virtual_device.blocking_read() {
@@ -123,7 +124,7 @@ fn main() {
 
         // Handle any non-standard transfers
         if let Some(xfer) = xfer {
-            let reply = handle_xfer(xfer, &state);
+            let reply = handle_xfer(xfer, &state, should_send_reports);
 
             // Write to the device if a reply is necessary
             if let Some(reply) = reply {
@@ -144,50 +145,67 @@ fn main() {
 }
 
 /// Handle any non-standard OUT transfers (host -> device)
-fn handle_xfer(xfer: Xfer, state: &PackedInputDataReport) -> Option<Reply> {
+fn handle_xfer(
+    xfer: Xfer,
+    state: &PackedInputDataReport,
+    should_send_reports: bool,
+) -> Option<Reply> {
     log::warn!("Got unhandled xfer: {:?}", xfer);
     let endpoint = xfer.ep;
-    log::debug!("Request for endpoint: {endpoint}");
+    log::warn!("Request for endpoint: {endpoint}");
 
     match xfer.direction() {
         // TODO: Make our own direction enum
         UsbIpDirection::Out => {
-            handle_xfer_gamepad_out(xfer);
+            handle_xfer_out(xfer);
             None
         }
-        UsbIpDirection::In => handle_xfer_gamepad_in(xfer, state),
+        UsbIpDirection::In => handle_xfer_in(xfer, state, should_send_reports),
     }
 }
 
 /// Handle any non-standard IN transfers (device -> host) for the gamepad iface
-fn handle_xfer_gamepad_in(xfer: Xfer, state: &PackedInputDataReport) -> Option<Reply> {
+fn handle_xfer_in(
+    xfer: Xfer,
+    state: &PackedInputDataReport,
+    should_send_reports: bool,
+) -> Option<Reply> {
     // IN transfers do not have a setup request.
-    log::debug!("Got IN xfer: {xfer:?}");
+    let endpoint = xfer.ep;
+    log::warn!("Got IN xfer: {xfer:?} for endpoint {endpoint}");
 
-    // Pack the state
-    //let data = match state.pack() {
-    //    Ok(data) => data,
-    //    Err(e) => {
-    //        log::error!("Failed to pack input data report: {e:?}");
-    //        return None;
-    //    }
-    //};
-
-    // TODO: Write an empty response for now
-    let data = [];
-
-    let reply = Reply::from_xfer(xfer, &data);
-    match reply {
-        Ok(reply) => Some(reply),
-        Err(e) => {
-            log::error!("Failed to create reply: {e:?}");
-            None
+    // Create a reply based on the endpoint
+    let reply = match endpoint {
+        // Gamepad
+        3 => {
+            if should_send_reports {
+                handle_xfer_in_gamepad(xfer, state)
+            } else {
+                Reply::from_xfer(xfer, &[])
+            }
         }
-    }
+        // All other endpoints, write empty data for now
+        _ => Reply::from_xfer(xfer, &[]),
+    };
+
+    Some(reply)
+}
+
+fn handle_xfer_in_gamepad(xfer: Xfer, state: &PackedInputDataReport) -> Reply {
+    // Pack the state
+    let report_data = match state.pack() {
+        Ok(data) => data,
+        Err(e) => {
+            log::error!("Failed to pack input data report: {e:?}");
+            return Reply::from_xfer(xfer, &[]);
+        }
+    };
+
+    Reply::from_xfer(xfer, &report_data)
 }
 
 /// Handle any non-standard OUT transfers (host -> device) for the gamepad iface
-fn handle_xfer_gamepad_out(xfer: Xfer) {
+fn handle_xfer_out(xfer: Xfer) {
     let Some(setup) = xfer.header() else {
         log::warn!("No setup request in OUT xfer");
         return;
@@ -195,7 +213,7 @@ fn handle_xfer_gamepad_out(xfer: Xfer) {
 
     // Only handle Class requests
     if setup.request_type() != Type::Class {
-        log::debug!("Unknown request type");
+        log::warn!("Unknown request type");
         return;
     }
 
@@ -226,7 +244,7 @@ fn handle_xfer_gamepad_out(xfer: Xfer) {
                 return;
             };
 
-            log::debug!("Got SetReport with type: {report_type:?}");
+            log::warn!("Got SetReport with type: {report_type:?}");
         }
         // Ignore other types of requests
         _ => {}
