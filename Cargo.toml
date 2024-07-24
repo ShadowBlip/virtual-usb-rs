@@ -7,7 +7,10 @@ edition = "2021"
 
 [dependencies]
 libudev = "0.3.0"
-log = "0.4.20"
+log = { version = "0.4.22", optional = true }
 packed_struct = "0.10.1"
 simple_logger = "5.0.0"
 socketpair = "0.19.4"
+
+[features]
+log = ["dep:log"]

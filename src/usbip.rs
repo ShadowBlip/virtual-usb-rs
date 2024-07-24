@@ -312,6 +312,7 @@ impl Driver {
         if nports <= 0 {
             return Err("No available ports".into());
         }
+        #[cfg(feature = "log")]
         log::debug!("available ports: {nports}");
         self.n_ports = nports;
 
@@ -333,10 +334,12 @@ impl Driver {
 
         // Create the content to send
         let data = format!("{port} {fd} {devid} {speed}");
+        #[cfg(feature = "log")]
         log::debug!("attach data: {data}");
 
         // Attach the device
         device.set_attribute_value("attach", data)?;
+        #[cfg(feature = "log")]
         log::debug!("attached port: {port}");
 
         Ok(())
@@ -354,6 +357,7 @@ impl Driver {
             return Err("Unable to find status attribute".into());
         }
         let status = result.unwrap().to_string_lossy().to_string();
+        #[cfg(feature = "log")]
         log::debug!("Status: {status:?}");
 
         // Prepare the vector of ports based on ports available
@@ -374,11 +378,13 @@ impl Driver {
             let port = match VirtualUsbPort::try_from(line) {
                 Ok(port) => port,
                 Err(e) => {
+                    #[cfg(feature = "log")]
                     log::warn!("Failed to parse port from status: {e:?}");
                     continue;
                 }
             };
 
+            #[cfg(feature = "log")]
             log::debug!("Found port: {port:?}");
             ports.push(port);
         }

@@ -343,6 +343,7 @@ impl HidInterfaceBuilder {
 
     /// Construct the new Interface configuration.
     pub fn build(&self) -> Interface {
+        #[cfg(feature = "log")]
         log::debug!("HID Interface: {}", self.iface);
         Interface::Hid(self.iface.clone())
     }

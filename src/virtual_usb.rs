@@ -178,12 +178,14 @@ impl VirtualUSBDevice {
         // Spawn read and write threads
         let read_socket = socket.try_clone()?;
         thread::spawn(move || {
+            #[cfg(feature = "log")]
             log::debug!("Spawning read handler");
             let mut handler = ReadHandler::new(read_socket, reader_tx);
             handler.run();
         });
         let write_socket = socket.try_clone()?;
         thread::spawn(move || {
+            #[cfg(feature = "log")]
             log::debug!("Spawning write handler");
             let mut handler = WriteHandler::new(write_socket, writer_rx);
             handler.run();
@@ -285,6 +287,7 @@ impl VirtualUSBDevice {
     /// endpoint, is always assumed to be a control endpoint and never has a
     /// descriptor.
     fn handle_command_submit_ep0(&mut self, cmd: &Command) -> Result<Option<Xfer>, Box<dyn Error>> {
+        #[cfg(feature = "log")]
         log::debug!("handle submit ep0");
         let USBIPCommandHeader::CmdSubmit(header) = cmd.header else {
             return Err("Invalid header for submit command".into());
@@ -310,6 +313,7 @@ impl VirtualUSBDevice {
     /// Handle command submit to any other USB endpoint.
     #[allow(non_snake_case)]
     fn handle_command_submit_epX(&self, cmd: &Command) -> Result<Option<Xfer>, Box<dyn Error>> {
+        #[cfg(feature = "log")]
         log::debug!("handle submit epX");
         let USBIPCommandHeader::CmdSubmit(header) = cmd.header else {
             return Err("Invalid header for submit command".into());
@@ -325,11 +329,13 @@ impl VirtualUSBDevice {
     /// Handle command submit OUT to any other USB endpoint.
     #[allow(non_snake_case)]
     fn handle_command_submit_epX_out(&self, cmd: &Command) -> Result<Option<Xfer>, Box<dyn Error>> {
+        #[cfg(feature = "log")]
         log::debug!("handle submit epX OUT");
         let USBIPCommandHeader::CmdSubmit(header) = cmd.header else {
             return Err("Invalid header for submit command".into());
         };
         let ep_idx = header.base.ep.to_primitive();
+        #[cfg(feature = "log")]
         log::debug!("handle submit epX OUT {ep_idx}");
         if ep_idx >= ENDPOINT_MAX_COUNT as u32 {
             return Err("Invalid endpoint index".into());
@@ -351,11 +357,13 @@ impl VirtualUSBDevice {
     /// Handle command submit IN to any other USB endpoint.
     #[allow(non_snake_case)]
     fn handle_command_submit_epX_in(&self, cmd: &Command) -> Result<Option<Xfer>, Box<dyn Error>> {
+        #[cfg(feature = "log")]
         log::debug!("handle submit epX IN");
         let USBIPCommandHeader::CmdSubmit(header) = cmd.header else {
             return Err("Invalid header for submit command".into());
         };
         let ep_idx = header.base.ep.to_primitive();
+        #[cfg(feature = "log")]
         log::debug!("handle submit epX IN {ep_idx}");
         if ep_idx >= ENDPOINT_MAX_COUNT as u32 {
             return Err("Invalid endpoint index".into());
@@ -393,6 +401,7 @@ impl VirtualUSBDevice {
 
     /// Handle unlinking
     fn handle_command_unlink(&self, cmd: &Command) -> Result<(), Box<dyn Error>> {
+        #[cfg(feature = "log")]
         log::debug!("handle unlink");
         let USBIPCommandHeader::CmdUnlink(_) = cmd.header else {
             return Err("Invalid header for unlink command".into());
@@ -410,6 +419,7 @@ impl VirtualUSBDevice {
         cmd: &Command,
         req: SetupRequest,
     ) -> Result<(), Box<dyn Error>> {
+        #[cfg(feature = "log")]
         log::debug!("handle submit ep0 standard request");
         let USBIPCommandHeader::CmdSubmit(header) = cmd.header else {
             return Err("Invalid header for submit command".into());
@@ -439,6 +449,7 @@ impl VirtualUSBDevice {
         req: SetupRequest,
         direction: UsbIpDirection,
     ) -> Result<(), Box<dyn Error>> {
+        #[cfg(feature = "log")]
         log::debug!("handle submit ep0 standard request for device");
         let USBIPCommandHeader::CmdSubmit(header) = cmd.header else {
             return Err("Invalid header for submit command".into());
@@ -449,6 +460,7 @@ impl VirtualUSBDevice {
             // IN command (data from device->host)
             UsbIpDirection::In => match req.b_request {
                 StandardRequest::GetStatus => {
+                    #[cfg(feature = "log")]
                     log::debug!("USB Request: GetStatus");
                     let Some(config) = self.current_config.as_ref() else {
                         return Err("No active configuration".to_string().into());
@@ -468,6 +480,7 @@ impl VirtualUSBDevice {
                     Ok(())
                 }
                 StandardRequest::GetDescriptor => {
+                    #[cfg(feature = "log")]
                     log::debug!("USB Request: GetDescriptor");
                     // Get the descriptor type
                     let desc_type = (req.w_value.to_primitive() & 0xFF00) >> 8;
@@ -480,11 +493,14 @@ impl VirtualUSBDevice {
                     // Get the reply data based on the descriptor type
                     let mut data = match desc_type {
                         DescriptorType::Device => {
+                            #[cfg(feature = "log")]
                             log::debug!("USB request GetDescriptor Device");
+                            #[cfg(feature = "log")]
                             log::debug!("Device: {}", self.info.device_desc);
                             self.info.device_desc.pack_to_vec()?
                         }
                         DescriptorType::Configuration => {
+                            #[cfg(feature = "log")]
                             log::debug!("USB request GetDescriptor Configuration {desc_idx}");
                             let Some(config_desc) = self.info.configs.get(desc_idx) else {
                                 return Err(format!(
@@ -493,10 +509,12 @@ impl VirtualUSBDevice {
                                 .into());
                             };
                             let config = config_desc as &Configuration;
+                            #[cfg(feature = "log")]
                             log::debug!("Config: {config}");
                             config.pack_to_vec()?
                         }
                         DescriptorType::String => {
+                            #[cfg(feature = "log")]
                             log::debug!("USB request GetDescriptor String {desc_idx}");
                             let Some(string_desc) = self.info.string_descs.get(desc_idx) else {
                                 return Err(format!(
@@ -505,14 +523,17 @@ impl VirtualUSBDevice {
                                 .into());
                             };
                             let string_desc = string_desc as &StringDescriptor;
+                            #[cfg(feature = "log")]
                             log::debug!("Got string: {}", string_desc.to_string());
                             string_desc.pack_to_vec()?
                         }
                         DescriptorType::DeviceQualifier => {
+                            #[cfg(feature = "log")]
                             log::debug!("USB request GetDescriptor DeviceQualifier");
                             self.info.device_qualifier_desc.pack_to_vec()?
                         }
                         DescriptorType::Debug => {
+                            #[cfg(feature = "log")]
                             log::debug!("USB request GetDescriptor Debug");
                             vec![]
                         }
@@ -537,6 +558,7 @@ impl VirtualUSBDevice {
                     Ok(())
                 }
                 StandardRequest::SetConfiguration => {
+                    #[cfg(feature = "log")]
                     log::debug!("USB Request: SetConfiguration");
                     let config_val = req.w_value.to_primitive() & 0x00FF;
                     let mut ok = false;
@@ -569,6 +591,7 @@ impl VirtualUSBDevice {
 
                 match req.b_request {
                     StandardRequest::SetConfiguration => {
+                        #[cfg(feature = "log")]
                         log::debug!("USB Request: SetConfiguration");
                         let config_val = req.w_value.to_primitive() & 0x00FF;
                         let mut ok = false;
@@ -603,12 +626,14 @@ impl VirtualUSBDevice {
         req: SetupRequest,
         direction: UsbIpDirection,
     ) -> Result<(), Box<dyn Error>> {
+        #[cfg(feature = "log")]
         log::debug!("handle submit ep0 standard request for interface");
 
         match direction {
             // IN command (data from device->host)
             UsbIpDirection::In => match req.b_request {
                 StandardRequest::GetDescriptor => {
+                    #[cfg(feature = "log")]
                     log::debug!("USB Request: GetDescriptor");
                     // Get the interface descriptor this request is for
                     let Some(config) = self.current_config.as_ref() else {
@@ -627,6 +652,7 @@ impl VirtualUSBDevice {
                     match iface {
                         Interface::Hid(hid_iface) => {
                             let hid_req = HidGetDescriptorRequest::from(req);
+                            #[cfg(feature = "log")]
                             log::debug!("GetDescriptor for HID: {hid_req}");
                             let desc_idx = hid_req.b_descriptor_index as usize;
 
@@ -781,6 +807,7 @@ impl WriteHandler {
             let reply = match self.virt_device.recv() {
                 Ok(msg) => msg,
                 Err(_) => {
+                    #[cfg(feature = "log")]
                     log::debug!("Channel closed. Stopping write handler.");
                     break;
                 }
@@ -788,6 +815,7 @@ impl WriteHandler {
 
             // Write the reply to the unix socket
             if let Err(e) = self.write(reply) {
+                #[cfg(feature = "log")]
                 log::debug!("Error writing reply: {e:?}");
                 break;
             }
@@ -796,14 +824,17 @@ impl WriteHandler {
 
     /// Write the given reply to the unix socket
     fn write(&mut self, reply: Reply) -> Result<(), Box<dyn Error>> {
+        #[cfg(feature = "log")]
         log::debug!("Got reply to write");
         // Write the message header to the socket
         let result = match reply.header {
             USBIPReplyHeader::RetSubmit(submit) => {
+                #[cfg(feature = "log")]
                 log::debug!("Write: {submit}");
                 self.socket.write(&submit.pack()?)
             }
             USBIPReplyHeader::RetUnlink(unlink) => {
+                #[cfg(feature = "log")]
                 log::debug!("Write: {unlink}");
                 self.socket.write(&unlink.pack()?)
             }
@@ -816,10 +847,15 @@ impl WriteHandler {
         }
 
         // Write the message payload to the socket if one exists
+        #[cfg(feature = "log")]
         log::debug!("Writing payload with size: {}", reply.payload.len());
+        #[cfg(feature = "log")]
         log::debug!("Payload: {:x?}", reply.payload.as_slice());
         match self.socket.write(reply.payload.as_slice()) {
-            Ok(bytes_written) => log::debug!("Wrote {bytes_written} bytes"),
+            Ok(bytes_written) => {
+                #[cfg(feature = "log")]
+                log::debug!("Wrote {bytes_written} bytes")
+            }
             Err(e) => {
                 return Err(format!("Failed to write message payload: {e:?}").into());
             }
@@ -851,6 +887,7 @@ impl ReadHandler {
             let cmd = match self.read() {
                 Ok(cmd) => cmd,
                 Err(e) => {
+                    #[cfg(feature = "log")]
                     log::debug!("Error reading commands: {e:?}");
                     break;
                 }
@@ -858,6 +895,7 @@ impl ReadHandler {
 
             // Send the command to the virtual USB device
             if self.virt_device.send(cmd).is_err() {
+                #[cfg(feature = "log")]
                 log::debug!("Channel closed. Stopping read handler.");
                 break;
             }
@@ -875,6 +913,7 @@ impl ReadHandler {
         }
 
         let header = USBIPHeaderInit::unpack(&buf)?;
+        #[cfg(feature = "log")]
         log::debug!("Got header: {header:?}");
 
         // Unpack the appropriate header based on the command
@@ -889,15 +928,19 @@ impl ReadHandler {
         };
 
         // TODO: Remove this
+        #[cfg(feature = "log")]
         log::debug!("Read command from socket");
         match header {
             USBIPCommandHeader::CmdSubmit(header) => {
+                #[cfg(feature = "log")]
                 log::debug!("{header}");
                 if !header.setup.is_empty() {
+                    #[cfg(feature = "log")]
                     log::debug!("{}", header.setup);
                 }
             }
             USBIPCommandHeader::CmdUnlink(header) => {
+                #[cfg(feature = "log")]
                 log::debug!("{header}");
             }
         }
@@ -924,11 +967,13 @@ impl ReadHandler {
         // Read the payload if one exists
         let payload_size = cmd.payload.capacity();
         if payload_size > 0 {
+            #[cfg(feature = "log")]
             log::debug!("Reading payload with size: {}", payload_size);
             cmd.payload.resize(payload_size, 0);
             let payload_buf = cmd.payload.as_mut_slice();
             self.socket.read_exact(payload_buf)?;
         }
+        #[cfg(feature = "log")]
         log::debug!("Cmd: {cmd:?}");
 
         Ok(cmd)
