@@ -131,6 +131,8 @@ pub struct VirtualUSBDevice {
     replies: Option<Sender<Reply>>,
     /// Receiver for reading commands from the USBIP unix socket
     commands: Option<Receiver<Command>>,
+    /// Sender for sending stop signal to reader thread
+    stop_sender: Option<Sender<Sender<()>>>,
 }
 
 impl VirtualUSBDevice {
@@ -142,6 +144,7 @@ impl VirtualUSBDevice {
             current_config: None,
             replies: None,
             commands: None,
+            stop_sender: None,
         }
     }
 
@@ -174,13 +177,15 @@ impl VirtualUSBDevice {
         self.replies = Some(writer_tx);
         let (reader_tx, reader_rx) = channel();
         self.commands = Some(reader_rx);
+        let (stop_tx, stop_rx) = channel();
+        self.stop_sender = Some(stop_tx);
 
         // Spawn read and write threads
         let read_socket = socket.try_clone()?;
         thread::spawn(move || {
             #[cfg(feature = "log")]
             log::debug!("Spawning read handler");
-            let mut handler = ReadHandler::new(read_socket, reader_tx);
+            let mut handler = ReadHandler::new(read_socket, reader_tx, stop_rx);
             handler.run();
         });
         let write_socket = socket.try_clone()?;
@@ -196,9 +201,27 @@ impl VirtualUSBDevice {
 
     /// Tear down the virtual USB device
     pub fn stop(&mut self) {
+        // Send a stop signal and wait for the read thread to stop
+        if let Some(stop_tx) = self.stop_sender.take() {
+            let (tx, rx) = channel();
+            if let Err(e) = stop_tx.send(tx) {
+                #[cfg(feature = "log")]
+                log::debug!("Failed to send stop signal: {e:?}");
+            } else {
+                thread::spawn(move || {
+                    #[cfg(feature = "log")]
+                    log::debug!("Waiting for read thread to stop");
+                    if let Err(e) = rx.recv() {
+                        #[cfg(feature = "log")]
+                        log::debug!("Failed to get response from read thread");
+                    }
+                });
+            }
+        }
+
         // Drop the channels to force the read/write threads to stop
-        self.replies = None;
-        self.commands = None;
+        //self.replies = None;
+        //self.commands = None;
     }
 
     /// To handle USB transfers, call read(). Before read() returns,
@@ -378,26 +401,6 @@ impl VirtualUSBDevice {
 
         Ok(Some(xfer))
     }
-
-    /// Send data to the host for an IN endpoint
-    //fn send_data_for_in_endpoint(&self, _cmd: &Command) -> Result<(), Box<dyn Error>> {
-    //    // TODO: Implement this
-    //    log::error!("Not implemented!");
-
-    //    // TODO: Figure this Out
-    //    // This is a GET_REPORT request for HID
-    //    // bm_request_type_direction | bits   0:0   | 0b1                | "In"
-    //    //      bm_request_type_kind | bits   1:2   | 0b01               | "Class"
-    //    // bm_request_type_recipient | bits   3:7   | 0b00001            | "Interface"
-    //    //                 b_request | bits   8:15  | 0b00000001         | "ClearFeature"
-    //    //                   w_value | bits  16:31  | 0b0000000000000011 | "768" (Report ID: 0, ReportType: Feature (3))
-    //    //                   w_index | bits  32:47  | 0b0000001000000000 | "2"
-    //    //                  w_length | bits  48:63  | 0b0100000000000000 | "64"
-
-    //    //self.reply(cmd, data, status);
-    //    //todo!();
-    //    Ok(())
-    //}
 
     /// Handle unlinking
     fn handle_command_unlink(&self, cmd: &Command) -> Result<(), Box<dyn Error>> {
@@ -870,19 +873,43 @@ impl WriteHandler {
 struct ReadHandler {
     socket: SocketpairStream,
     virt_device: Sender<Command>,
+    stop_rx: Receiver<Sender<()>>,
 }
 
 impl ReadHandler {
-    fn new(socket: SocketpairStream, device: Sender<Command>) -> Self {
+    fn new(
+        socket: SocketpairStream,
+        device: Sender<Command>,
+        stop_rx: Receiver<Sender<()>>,
+    ) -> Self {
         Self {
             socket,
             virt_device: device,
+            stop_rx,
         }
     }
 
     /// Run the read handler
     fn run(&mut self) {
         loop {
+            // Check to see if the thread should stop
+            match self.stop_rx.try_recv() {
+                Ok(tx) => {
+                    if let Err(e) = tx.send(()) {
+                        #[cfg(feature = "log")]
+                        log::debug!("Failed to send stop confirmation");
+                    }
+                    break;
+                }
+                Err(e) => match e {
+                    TryRecvError::Empty => (),
+                    TryRecvError::Disconnected => {
+                        #[cfg(feature = "log")]
+                        log::debug!("Channel closed. Stopping read handler.");
+                    }
+                },
+            }
+
             // Read commands from the unix socket
             let cmd = match self.read() {
                 Ok(cmd) => cmd,
