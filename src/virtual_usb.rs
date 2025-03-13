@@ -476,7 +476,7 @@ impl VirtualUSBDevice {
                     if self_powered == 1 {
                         reply |= 1;
                     }
-                    let data: [u8; 4] = reply.to_msb_bytes();
+                    let data: [u8; 2] = (reply as i16).to_msb_bytes();
 
                     // Write the reply
                     self.reply(cmd, &data, 0)?;
@@ -718,7 +718,8 @@ impl VirtualUSBDevice {
                 match header.direction {
                     UsbIpDirection::In => {
                         if data.is_empty() {
-                            return Err("No data to send IN reply".into());
+                            #[cfg(feature = "log")]
+                            log::warn!("No data to send IN reply");
                         }
                     }
                     UsbIpDirection::Out => {
